@@ -1,0 +1,11 @@
+#!/bin/sh
+FNAME=spanish-num
+cargo build --release 
+cd target/release/
+tar -cvf $FNAME.tar.gz $FNAME
+if [ -f $FNAME.tar.gz ] ;then
+  echo ">>   Compressed file created!"
+else
+  echo ">>   Compressed file creation failed!"
+fi
+echo '>>    Done'

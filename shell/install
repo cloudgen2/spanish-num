@@ -1,0 +1,23 @@
+#!/bin/sh
+FNAME=spanish-num
+cargo build --release 
+mkdir -p  ~/.local/bin
+if [ -f ~/.local/bin/$FNAME ]; then
+  rm ~/.local/bin/$FNAME
+  echo ">>    Old file removed!"
+fi
+cp -rP  target/release/$FNAME ~/.local/bin
+chmod +x ~/.local/bin/*
+content=$(cat ~/.zshenv)
+result=$(echo $content | grep "modified to add ~/.local/bin")
+if [ -z "$result" ] ;then
+  cat << EOF >> ~/.zshenv 
+# modified to add ~/.local/bin to PATH
+path+=('~/.local/bin')
+export PATH
+EOF
+  echo ">>    ~/.zshenv has been modified!"
+else
+  echo ">>    ~/.zshenv has modified previously!"
+fi
+echo '>>    Done installation'
