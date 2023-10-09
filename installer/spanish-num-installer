@@ -869,11 +869,11 @@ class AppBase(object):
         elif self.isLocal():
             latest = self.latest_version()
             if self.need_update():
-                self.infoMsg("You are using an old (%s.%s) Local Installation's copy already!", "SELF INSTALL" % (self.majorVersion(),self.minorVersion())) 
+                self.infoMsg("You are using an old (%s.%s) Local Installation's copy already!" % (self.majorVersion(),self.minorVersion()), "SELF INSTALL") 
                 if 'yes' == self.__ask_yesno__('Do you want to update from latest (%s) internet? (yes/no) ' % latest):  
                     return self.download_and_install(verbal)
             else:
-                self.infoMsg("You are using latest (%s) Global Installation's copy already!" % latest, "SELF INSTALL")
+                self.infoMsg("You are using latest (%s) Local Installation's copy already!" % latest, "SELF INSTALL")
                 return False
         elif self.installedGlobal():
             self.infoMsg("Global Installation installed already!", "SELF INSTALL")
