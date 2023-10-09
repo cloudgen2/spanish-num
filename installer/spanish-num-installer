@@ -1192,6 +1192,6 @@ class OnlineInstaller(AppBase):
 if __name__ == "__main__":
     app = OnlineInstaller()
     app.targetApp('german-num')
-    app.setInstallation(appName='spanish-num-installer',author='Cloudgen Wong',homepage="https://github.com/cloudgen2/spanish-num",downloadUrl="https://dl.leolio.page/spanish-num/",lastUpdate='2023-10-02',majorVersion=0,minorVersion=2)
+    app.setInstallation(appName='spanish-num-installer',author='Cloudgen Wong',homepage="https://github.com/cloudgen2/spanish-num",downloadUrl="https://dl.leolio.page/spanish-num/",lastUpdate='2023-10-08',majorVersion=0,minorVersion=3)
     app.start() 
 

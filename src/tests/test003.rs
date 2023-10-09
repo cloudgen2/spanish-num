@@ -196,8 +196,9 @@ pub fn function(lang:Lang) {
     for n in 301..306 {
         ask_n_check_fruit(n, 1, 20, Fruit::WaterMelon, lang);
     }
-    for n in 306..314 {
-        ask_n_check_fruit(n, 1, 100, Fruit::Any, lang);
+    ask_n_check_fruit(306, 1, 2, Fruit::Grape, lang);
+    for n in 307..314 {
+        ask_n_check_fruit(n, 1, 20, Fruit::Grape, lang);
     }
     for n in 314..321 {
         ask_n_check_animal(n, 1, 100, Animal::Any, lang);
@@ -206,17 +207,28 @@ pub fn function(lang:Lang) {
     for n in 321..330 {
         ask_n_check_drink(n, 1, 100, Drink::Any, lang);
     }
-    for n in 330..341 {
+    for n in 330..336 {
         ask_n_check_food(n, 1, 100, Food::Any, lang);
+    }
+    for n in 336..341 {
+        ask_n_check_drink(n, 1, 100, Drink::Any, lang);
     }
     print_level(18, lang);
     ask_n_check_transport(341, 1, 2, Transport::Bus, lang);
-    for n in 342..351 {
+    for n in 342..346 {
         ask_n_check_transport(n, 1, 100, Transport::Bus, lang);
     }
+    ask_n_check_transport(346, 1, 2, Transport::Taxi, lang);
+    for n in 347..351 {
+        ask_n_check_transport(n, 1, 100, Transport::Taxi, lang);
+    }
     ask_n_check_transport(351, 1, 2, Transport::Car, lang);
-    for n in 352..361 {
+    for n in 352..356 {
         ask_n_check_transport(n, 1, 100, Transport::Car, lang);
+    }
+    ask_n_check_transport(356, 1, 2, Transport::Ambulance, lang);
+    for n in 357..361 {
+        ask_n_check_transport(n, 1, 100, Transport::Ambulance, lang);
     }
     print_level(19, lang);
     for n in 361..371 {

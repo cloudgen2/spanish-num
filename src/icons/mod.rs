@@ -24,11 +24,12 @@ pub fn fruit_icon(fruit: Fruit) -> String{
         Fruit::Apple => icon=String::from("🍎"),
         Fruit::Orange => icon=String::from("🍊"),
         Fruit::Banana => icon=String::from("🍌"),
+        Fruit::Grape => icon=String::from("🍇"),
         Fruit::Strawberry => icon=String::from("🍓"),
         Fruit::Pear => icon=String::from("🍐"),
         Fruit::WaterMelon => icon=String::from("🍉"),
         Fruit::Cherry => icon=String::from("🍒"),
-        Fruit::Any => icon=String::from("🍎🍊🍌🍓🍐🍉🍒") 
+        Fruit::Any => icon=String::from("🍎🍊🍌🍇🍓🍐🍉🍒") 
     }
     icon
 }
@@ -64,9 +65,11 @@ pub fn food_icon(food: Food) -> String{
 pub fn transport_icon(transport: Transport) -> String{
     let icon: String;
     match transport {
+        Transport::Ambulance => icon=String::from("🚑"),
         Transport::Bus => icon=String::from("🚌"),
         Transport::Car => icon=String::from("🚗"),
-        Transport::Any => icon=String::from("🚌🚗")
+        Transport::Taxi => icon=String::from("🚖"),
+        Transport::Any => icon=String::from("🚑🚌🚗🚖")
     }
     icon
 }
