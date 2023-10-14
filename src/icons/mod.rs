@@ -43,7 +43,8 @@ pub fn animal_icon(animal: Animal) -> String{
         Animal::Fish => icon=String::from("🐟"),
         Animal::Horse => icon=String::from("🐎"),
         Animal::Rabbit => icon=String::from("🐇"),
-        Animal::Any => icon=String::from("🐦😺🐶🐟🐎🐇")
+        Animal::Pig => icon=String::from("🐖"),
+        Animal::Any => icon=String::from("🐦😺🐶🐟🐎🐖🐇")
     }
     icon
 }

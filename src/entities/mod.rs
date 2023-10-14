@@ -27,6 +27,7 @@ pub enum Animal {
     Dog,
     Fish,
     Horse,
+    Pig,
     Rabbit
 }
 

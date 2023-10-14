@@ -40,7 +40,7 @@ pub fn ask_n_check_sub(q: u32, num: u32, icon: &String, check: String) {
     if receive_ans.eq(&check) {
         print_correct();
     } else if receive_ans.eq("exit") {
-        process::exit(1);
+        process::exit(0);
     } else if process_ans(&receive_ans).eq(&process_ans(&check)) { 
         print_correct_ans(&check);
         print_correct();
@@ -53,7 +53,7 @@ pub fn ask_n_check_sub(q: u32, num: u32, icon: &String, check: String) {
             print_correct_ans(&check);
             print_correct();
         } else if receive_ans.eq("exit") {
-            process::exit(1);
+            process::exit(0);
         } else {
             print_correct_ans(&check);
         }
@@ -70,7 +70,7 @@ pub fn ask_num_n_check_sub(q: u32, num: u32, check: String) {
     if receive_ans.eq(&check) {
         print_correct();
     } else if receive_ans.eq("exit") {
-        process::exit(1);
+        process::exit(0);
     } else if process_ans(&receive_ans).eq(&process_ans(&check)) { 
         print_correct_ans(&check);
         print_correct();
@@ -83,7 +83,7 @@ pub fn ask_num_n_check_sub(q: u32, num: u32, check: String) {
             print_correct_ans(&check);
             print_correct();
         } else if receive_ans.eq("exit") {
-            process::exit(1);
+            process::exit(0);
         } else {
             println!("**{}**", receive_ans);
             print_correct_ans(&check);

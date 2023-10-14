@@ -28,7 +28,7 @@ fn main() {
     println!("############################");
     println!("#");
     println!("# {} v.{}", APPNAME, VERSION);
-    print_update_at("2023-10-08", lang);
+    print_update_at("2023-10-14", lang);
     println!("#");
     println!("############################");
     println!("");

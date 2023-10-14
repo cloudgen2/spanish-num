@@ -200,8 +200,9 @@ pub fn function(lang:Lang) {
     for n in 307..314 {
         ask_n_check_fruit(n, 1, 20, Fruit::Grape, lang);
     }
-    for n in 314..321 {
-        ask_n_check_animal(n, 1, 100, Animal::Any, lang);
+    ask_n_check_animal(314, 1, 2, Animal::Pig, lang);
+    for n in 315..321 {
+        ask_n_check_animal(n, 1, 100, Animal::Pig, lang);
     }
     print_level(17, lang);
     for n in 321..330 {
