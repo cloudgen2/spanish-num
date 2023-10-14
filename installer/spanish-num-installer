@@ -549,10 +549,7 @@ class AppBase(object):
         self.print("    Python Executable: %s" % self.executable())
         self.print("    Binary Version: %s" % self.binaryVersion() )
         self.print("")
-        if self.shellCmd() == 'cmd':
-            fname="C:\\Users\\%s\\Downloads\\%s-%s.bat" % (self.username(), self.appName(),self.timestamp())
-        else:
-            fname="/tmp/%s-%s" % (self.appName(),self.timestamp())
+        fname = self.tempFile()
         result, stdout = self.shell("curl -fsSL -o %s %s" % (fname, self.downloadUrl()), True)
         self.print(stdout)
         if result:
@@ -571,6 +568,28 @@ class AppBase(object):
             return x.group(1)
         else:
             ''
+
+    def downloadTarget(self):
+        if self.targetApp() == '':
+            return
+        fname = self.tempAttachment()
+        self.infoMsg("Downloading: %s" % self.targetDownloadUrl(),"DOWNLOAD FILES")
+        result, stdout = self.shell("curl -fsSL -o %s %s" % (fname, self.targetDownloadUrl()), True)
+        self.print("")
+        if os.path.exists(fname):
+            os.chdir(self.tempFolder())
+            result, stdout = self.shell("tar -xvf %s" % fname.split('/')[-1], True)
+            this = self.tempAttachDecomp()
+            if os.path.exists(this):
+                self.this(this)
+                if self.username() == 'root':
+                    self.install_target_local(this)
+                else:
+                    self.install_target_local(this)
+            else:
+                self.criticalMsg("File Extraction error: %s not found" % this, "DOWNLOAD ERROR")
+        else: 
+            self.criticalMsg("Download error: %s" % self.tempAttachment(), "DOWNLOAD ERROR")
 
     def downloadUrl(self, downloadUrl=None):
         if downloadUrl is not None:
@@ -703,6 +722,32 @@ class AppBase(object):
         if which == '' or which == self.globalInstallPath():    
             return False    
         return os.path.exists(self.which()) 
+
+    def install_target_global(self, this):
+        if self.targetApp() != '':
+            result, stdout = self.shell("rm -rf %s/%s" % (self.globalInstallRoot(), self.targetApp()))
+        result, stdout = self.shell("cp %s %s" % ( this, self.globalInstallRoot()))
+        result, stdout = self.shell("chmod +x %s/%s" % (self.globalInstallRoot(), self.targetApp()))
+        if result:
+            self.safeMsg("Installed Globally! \n  Your OS is: %s\n  Please type 'hash -r'%s to refresh bash shell hash!\n  Then, you can type '%s' to run!" 
+                % (self.osVersion(), startSh, self.targetApp()), "SELF INSTALL")
+
+    def install_target_local(self, this):
+        result, stdout = self.shell("mkdir -p %s" % self.localInstallFolder())
+        if self.targetApp() != '':
+            result, stdout = self.shell("rm -rf %s/%s" % (self.localInstallFolder(), self.targetApp()))
+        result, stdout = self.shell("cp %s %s" % ( this, self.localInstallFolder()))
+        result, stdout = self.shell("chmod +x %s/%s" % (self.localInstallFolder(), self.targetApp()))
+        startSh =  ""
+        if self.osVersion() == 'macOS':
+            self.check_and_modify_zshenv()
+            startSh = " and 'source ~/.zshenv'"
+        elif self.osVersion() != 'Alpine' :
+            self.check_and_modify_bashrc()
+            startSh =  " and 'source ~/.bashrc'"
+        if result:
+            self.safeMsg("Installed Locally! \n  Your OS is: %s\n  Please type 'hash -r'%s to refresh bash shell hash!\n  Then, you can type '%s' to run!" 
+                % (self.osVersion(), startSh, self.targetApp()), "SELF INSTALL")
 
     def is_bashrc_modified(self):
         # Check if .bashrc file exists and if it contains the modification lines
@@ -1094,6 +1139,50 @@ class AppBase(object):
             self.__TAG__=''
         return self.__TAG__
 
+    def targetApp(self, app=None):
+        if app is not None:
+            self.__target_app__=app
+            return self
+        elif not hasattr( self, '__target_app__' ):
+            self.__target_app__=''
+        return self.__target_app__
+
+    def targetDownloadUrl(self):
+        return "%s%s/%d.%d/%s.tar.gz" % (self.downloadUrl(), self.binaryVersion(), self.majorVersion(),self.minorVersion(), self.targetApp())
+
+    def tempAttachment(self):
+        if self.shellCmd() == 'cmd':
+            fname="%s\\Downloads\\%s-%s.zip" % (self.tempFolder(),self.targetApp(),self.timestamp())
+        else:
+            fname="%s/%s-%s.tar.gz" % (self.tempFolder(), self.targetApp(),self.timestamp())
+        return fname
+
+    def tempAttachDecomp(self):
+        if self.shellCmd() == 'cmd':
+            fname="%s\\Downloads\\%s" % (self.tempFolder(),self.targetApp())
+        else:
+            fname="%s/%s" % (self.tempFolder(), self.targetApp())
+        return fname
+
+    def tempFile(self):
+        if self.shellCmd() == 'cmd':
+            fname="%s\\Downloads\\%s-%s.bat" % (self.tempFolder(), self.appName(),self.timestamp())
+        else:
+            fname="%s/%s-%s" % (self.tempFolder(), self.appName(),self.timestamp())
+        return fname
+
+    def tempFolder(self):
+        if self.shellCmd() == 'cmd':
+            folder="C:\\Users\\%s\\Downloads" % self.username()
+        elif self.username() == 'root':
+            folder="/tmp" 
+        elif self.osVersion() == 'macOS':
+            folder = '/Users/%s/Library/Caches' % self.username()
+        else:
+            folder="/home/%s/.local/temp" % self.username()
+            self.mkdir(folder)
+        return folder
+
     def this(self, this = None):
         if this is None :
             if hasattr(self, '__this__'):
@@ -1174,118 +1263,12 @@ class AppBase(object):
     def zshenv(self):
         return os.path.join(self.home(), ".zshenv")
 
+
 class OnlineInstaller(AppBase):
 
     def start(self):
         self.allowInstallLocal(True)
         self.__parseArgs__()
-
-    def __parseArgs__(self, allowSelfInstall = True, allowDisplayInfo = True):
-        if self.isLocal() or self.isGlobal():
-            appPath = self.appName()
-        elif self.appPath() != '' :
-            if self.shellCmd() == 'cmd':
-                appPath = self.appName() + '.bat'
-            else:
-                appPath = './' + self.appName()
-        else:
-            appPath = ''
-        usage = "%s [check-update|install|uninstall]" % appPath
-        if self.appPath() != '' :
-            if len(sys.argv) > 1:
-                self.cmd(sys.argv[1])
-                if self.cmd() == "install" or self.cmd() == "update":
-                    self.selfInstall()
-                elif self.cmd() == "uninstall":
-                    if self.installedGlobal():
-                        if self.selfUninstallGlobal(False):
-                            self.infoMsg("You have uninstalled globally successfully. Please run `hash -r` manually!", "GLOBAL UNINSTALL")
-                        else:
-                            self.criticalMsg("Failed to uninstall globally", "UNINSTALL FAILED")
-                    elif self.installedLocal():
-                        if self.selfUninstallLocal(False):
-                            self.infoMsg("You have uninstalled locally successfully.", "LOCAL UNINSTALL")
-                        else:
-                            self.criticalMsg("Failed to uninstall locally", "UNINSTALL FAILED")
-                    else:
-                        self.infoMsg("You don't have any global or local installation.", "UNINSTALL")
-                elif self.cmd() == "check-update" or self.cmd() == "check-version"  or self.cmd() == "check":
-                    latest = self.latest_version()
-                    if self.need_update():
-                        self.infoMsg("Latest Version = %s\n  Update is available" % latest, "CHECK UPDATE")
-                    elif latest != '0.0':
-                        self.infoMsg("You are using most updated version: %s" % latest, "CHECK UPDATE")
-                elif allowDisplayInfo:
-                    self.info(usage)
-            elif allowDisplayInfo:
-                self.info(usage)
-        elif allowSelfInstall:
-            if '<stdin>' == self.thisFile():
-                self.download_and_install()
-            else:
-                self.selfInstall()
-
-class OnlineInstaller(AppBase):
-
-    def install_target_global(self, this):
-        if self.targetApp() != '':
-            result, stdout = self.shell("rm -rf %s/%s" % (self.globalInstallRoot(), self.targetApp()))
-        result, stdout = self.shell("cp %s %s" % ( this, self.globalInstallRoot()))
-        result, stdout = self.shell("chmod +x %s/%s" % (self.globalInstallRoot(), self.targetApp()))
-        if result:
-            self.safeMsg("Installed Globally! \n  Your OS is: %s\n  Please type 'hash -r'%s to refresh bash shell hash!\n  Then, you can type '%s' to run!" 
-                % (self.osVersion(), startSh, self.targetApp()), "SELF INSTALL")
-
-    def install_target_local(self, this):
-        result, stdout = self.shell("mkdir -p %s" % self.localInstallFolder())
-        if self.targetApp() != '':
-            result, stdout = self.shell("rm -rf %s/%s" % (self.localInstallFolder(), self.targetApp()))
-        result, stdout = self.shell("cp %s %s" % ( this, self.localInstallFolder()))
-        result, stdout = self.shell("chmod +x %s/%s" % (self.localInstallFolder(), self.targetApp()))
-        startSh =  ""
-        if self.osVersion() == 'macOS':
-            self.check_and_modify_zshenv()
-            startSh = " and 'source ~/.zshenv'"
-        elif self.osVersion() != 'Alpine' :
-            self.check_and_modify_bashrc()
-            startSh =  " and 'source ~/.bashrc'"
-        if result:
-            self.safeMsg("Installed Locally! \n  Your OS is: %s\n  Please type 'hash -r'%s to refresh bash shell hash!\n  Then, you can type '%s' to run!" 
-                % (self.osVersion(), startSh, self.targetApp()), "SELF INSTALL")
-
-    def downloadTarget(self):
-        if self.targetApp() == '':
-            return
-        fname = '/tmp/%s.tar.gz' % self.targetApp()
-        self.print("  ... downloading %s ..." % self.targetDownloadUrl())
-        result, stdout = self.shell("curl -fsSL -o %s %s" % (fname, self.targetDownloadUrl()), True)
-        if result:
-            os.chdir('/tmp')
-            result, stdout = self.shell("tar -xvf %s.tar.gz" % ( self.targetApp()), True)
-            this = "/tmp/%s" % self.targetApp()
-            self.this(this)
-            if self.username() == 'root':
-                self.install_target_local(this)
-            else:
-                self.install_target_local(this)
-
-    def start(self):
-        self.allowInstallLocal(True)
-        self.__parseArgs__()
-
-    def targetApp(self, app=None):
-        if app is not None:
-            self.__target_app__=app
-            return self
-        elif not hasattr( self, '__target_app__' ):
-            self.__target_app__=''
-        return self.__target_app__
-
-    def targetDownloadUrl(self):
-        libc = 'glibc'
-        if 'Clang' in self.libcVersion():
-            libc = 'clang'
-        return "%s%s-%s/%d.%d/%s.tar.gz" % (self.downloadUrl(), self.arch().split(' ')[0].lower(), libc, self.majorVersion(),self.minorVersion(), self.targetApp())
 
     def __parseArgs__(self, allowSelfInstall = True, allowDisplayInfo = True):
         if self.isLocal() or self.isGlobal():
@@ -1339,5 +1322,4 @@ if __name__ == "__main__":
     app.targetApp('spanish-num')
     app.setInstallation(appName='spanish-num-installer',author='Cloudgen Wong',homepage="https://github.com/cloudgen2/spanish-num",downloadUrl="https://dl.leolio.page/spanish-num/",lastUpdate='2023-10-14',majorVersion=0,minorVersion=4)
     app.start() 
-
 
