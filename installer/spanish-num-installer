@@ -160,9 +160,6 @@ class AppBase(object):
             self.__cmt__=""
         return self.__cmt__
 
-    def __current_path__(self, x):
-        return "%s/%s" % (os.getcwd(),x)
-
     def __formattedMsg__(self):
         return "%s %s %s\n  %s" % (self.__timeMsg__(),self.__header__(),\
             self.__tagMsg__(),self.__coloredMsg__())
@@ -196,24 +193,6 @@ class AppBase(object):
         elif not hasattr(self,'__ht__'):
             self.__ht__=""
         return self.__ht__
-
-    def path_to_dos(self, path):
-        # Avoid doing any os.path.realpath conversion before cessing
-        split_path=path.split('/')
-        count=0
-        result=''
-        for pathlet in split_path:
-            # Avoid repeatively adding c:, it should not been there
-            if pathlet!= '' and pathlet[-1] != ':':
-                count = count + 1
-                if count == 1:
-                    if len(pathlet) == 1:
-                        result = pathlet + ':'
-                    else:
-                        result = pathlet
-                else:
-                    result = result + '\\' + pathlet
-        return result
 
     def __install_local__(self, this = None, verbal = True ):
         result = False
@@ -356,7 +335,7 @@ class AppBase(object):
     def __tagMsg__(self,color=None,outterColor=None):
         if color is None:
             if self.__tag__() == '' or not self.useColor():
-                return ': '
+                return '[%s]: ' % self.__tag__()
             else:
                 return "%s[%s%s%s%s%s]:%s " % (self.__tagOutterColor__(),\
                     self.__tagTerm__(),self.__tagColor__(),\
@@ -732,7 +711,12 @@ class AppBase(object):
             self.__curPath__=curPath
             return self
         elif not hasattr(self, '__curPath__'):
-            self.__curPath__=os.getcwd()
+            pw='%s' % os.getcwd()
+            if self.isGitBash() and ':' in pw:
+                pw=pw.split(':')
+                self.__curPath__='/'+pw[0]+'/'.join(pw[1].split('\\'))
+            else:
+                self.__curPath__=pw
         return self.__curPath__
 
     def download_to_temp(self, url=None, file=None,verbal = False):
@@ -1083,6 +1067,24 @@ class AppBase(object):
                 self.__distro__ = stdout.strip()
         return self.__distro__
 
+    def path_to_dos(self, path):
+        # Avoid doing any os.path.realpath conversion
+        split_path=path.split('/')
+        count=0
+        result=''
+        for pathlet in split_path:
+            # Avoid repeatively adding c:, it should not been there
+            if pathlet!= '' and pathlet[-1] != ':':
+                count = count + 1
+                if count == 1:
+                    if len(pathlet) == 1:
+                        result = pathlet + ':'
+                    else:
+                        result = pathlet
+                else:
+                    result = result + '\\' + pathlet
+        return result
+
     def parseArgs(self, usage, allowSelfInstall = True, allowDisplayInfo = True):
         if self.appPath() != '' :
             if len(sys.argv) > 1:
@@ -1179,6 +1181,29 @@ class AppBase(object):
         if len( self.__python_version__.split('('))>1:
             self.__python_version__ =  self.__python_version__.split('(')[0].strip()
         return self.__python_version__
+
+    def realpath(self, x, curr_path=None):
+        if curr_path is None:
+            curr_path = self.curPath()
+        if self.isCmd():
+            if x[:1].startswith(':\\'):
+                result=x
+            elif x.startswith('..\\'):
+                curr_path= '\\'.join(curr_path.split('\\')[:-1])
+                if curr_path=='':
+                    curr_path=self.curPath()
+            result=self.path_to_dos('%s\\%s'% (os.getcwd(),x))
+        else:
+            if x.startswith('/'):
+                result=x
+            elif x.startswith('../../'):
+                x=x[6:]
+                curr_path = '/'.join(curr_path.split('/')[:-2])
+            elif x.startswith('../'):
+                x=x[3:]
+                curr_path = '/'.join(curr_path.split('/')[:-1])
+            result='%s/%s' % (curr_path,x)
+        return result
 
     def removeFile(self, filePath):
         if self.isCmd() or self.isGitBash():
@@ -1415,7 +1440,7 @@ class AppBase(object):
         if self.isLinuxShell():
             return "%s/%s-%s.tar.gz" % (self.tempFolder(), self.targetApp(), timestamp)
         elif self.isGitBash() or self.isCmd():
-            return "%s\%s-%s.tar.gz" % (self.tempFolder(), self.targetApp(), timestamp)
+            return "%s\\%s-%s.tar.gz" % (self.tempFolder(), self.targetApp(), timestamp)
         return "%s/%s-%s.tar.gz" % (self.tempFolder(), self.targetApp(), timestamp)
 
     def tempAttachDecomp(self):
@@ -1502,19 +1527,19 @@ class AppBase(object):
         if self.isCmd() or self.isGitBash():
             return self.where_cmd(cmd)
         elif self.isLinuxShell():
-            if self.pathexists('/usr/bin/which'):
+            if os.path.exists('/usr/bin/which'):
                 result, stdout = self.shell("/usr/bin/which %s" % cmd, ignoreErr=True)
                 return stdout.strip()
-            elif self.pathexists('/bin/which'):
+            elif os.path.exists('/bin/which'):
                 result, stdout = self.shell("/usr/bin/which %s" % cmd, ignoreErr=True)
                 return stdout.strip()
-            elif self.pathexists('/bin/%s' % cmd):
+            elif os.path.exists('/bin/%s' % cmd):
                 return '/bin/%s' % cmd
-            elif self.pathexists('/usr/bin/%s' % cmd):
+            elif os.path.exists('/usr/bin/%s' % cmd):
                 return '/usr/bin/%s' % cmd
-            elif self.pathexists('/usr/bin/local/%s' % cmd):
+            elif os.path.exists('/usr/bin/local/%s' % cmd):
                 return '/usr/bin/local/%s' % cmd
-            elif self.pathexists('/home/%s/.local/bin/%s' % [self.username(), cmd]):
+            elif os.path.exists('/home/%s/.local/bin/%s' % [self.username(), cmd]):
                 return '/home/%s/.local/bin/%s' % [self.username(), cmd]
             elif 'PATH' in os.environ:
                 split_path = os.environ['PATH'].split(':')
