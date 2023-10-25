@@ -13,11 +13,57 @@
 ##!     exit /b 0
 ##! )
 ##! FOR /F "tokens=*" %%g IN ('where python3.exe') do (SET VAR=%%g)
-##! if exist %VAR% ( python "%~f0" %* )
+##! if exist %VAR% ( python3 "%~f0" %* )
 ##! exit /b 0
 ##! """
 """:"
-_PY_=$(which python3); if [ -z $_PY_ ]; then _PY_=$(which python2); if [ -z $_PY_ ]; then _PY_=$(which pypy3); if [ -z $_PY_ ]; then _PY_=$(which pypy); if [ -z $_PY_ ]; then _PY_=$(which python); if [ -z $_PY_ ]; then exit 1; fi; fi; fi; fi; fi; exec $_PY_ "$0" "$@"
+if [ -f /usr/bin/sw_vers ]; then
+  WHICH='which'
+elif [ -f /usr/bin/which ]; then
+  WHICH='/usr/bin/which'
+elif [ -f /bin/which ]; then
+  WHICH='/bin/which'
+elif [ -f "C:\\Windows\\System32\\where.exe" ]; then
+  WHICH="C:\\Windows\\System32\\where.exe"
+fi
+if [ ! -z $WHICH ]; then
+    _PY_=$($WHICH python3)
+    if [ -z $_PY_ ]; then _PY_=$($WHICH python2); if [ -z $_PY_ ]; then _PY_=$($WHICH pypy3); if [ -z $_PY_ ]; then _PY_=$($WHICH pypy); if [ -z $_PY_ ]; then _PY_=$($WHICH python); if [ -z $_PY_ ]; then echo 'No Python Found'; fi; fi; fi; fi; fi; 
+    if [ ! -z "$_PY_" ]; then
+        WINPTY=$($WHICH winpty.exe)
+        if [ ! -z "$WINPTY" ]; then
+            PY_EXE=$($WHICH python.exe)
+            if [ ! -z "$PY_EXE" ]; then
+                exec "$WINPTY" "$PY_EXE" "$0" "$@"
+                exit 0
+            fi
+        else
+            exec $_PY_ "$0" "$@"
+            exit 0
+        fi
+    fi
+fi
+if [  -f /usr/bin/python3 ]; then
+    exec /usr/bin/python3 "$0" "$@"
+    exit 0
+fi
+if [  -f /usr/bin/python2 ]; then
+    exec /usr/bin/python2 "$0" "$@"
+    exit 0
+if [  -f /usr/bin/python ]; then
+    exec /usr/bin/python "$0" "$@"
+    exit 0
+fi
+if [  -f /usr/bin/pypy3 ]; then
+    exec /usr/bin/pypy3 "$0" "$@"
+    exit 0
+fi 
+if [  -f /usr/bin/pypy ]; then
+    exec /usr/bin/pypy "$0" "$@"
+    exit 0
+fi
+# This is code from online-installer, homepage: https://github.com/cloudgen2/online-installer
+exit 0
 ":"""
 from __future__ import print_function
 try:
@@ -31,7 +77,7 @@ except NameError:
 try: 
     __file__
 except NameError: 
-    __file__ = None
+    __file__ = ''
 
 try:
     import pwd
@@ -151,59 +197,80 @@ class AppBase(object):
             self.__ht__=""
         return self.__ht__
 
+    def path_to_dos(self, path):
+        # Avoid doing any os.path.realpath conversion before cessing
+        split_path=path.split('/')
+        count=0
+        result=''
+        for pathlet in split_path:
+            # Avoid repeatively adding c:, it should not been there
+            if pathlet!= '' and pathlet[-1] != ':':
+                count = count + 1
+                if count == 1:
+                    if len(pathlet) == 1:
+                        result = pathlet + ':'
+                    else:
+                        result = pathlet
+                else:
+                    result = result + '\\' + pathlet
+        return result
+
     def __install_local__(self, this = None, verbal = True ):
         result = False
         if this is None:
-            this = self.this()
-        if self.shellCmd() == 'cmd':
+            this = self.thisFile()
+        if self.isCmd() or self.isGitBash():
             file = 'C:\\Users\\%s\\AppData\\Local\\Microsoft\\WindowsApps\\%s.bat' % (self.username(),self.appName())
-            file1 = open(this, 'r')
-            file2 = open(file,'w')
-            for line in file1:
-                if line.startswith('##! '):
-                    file2.write(line[4:])
-                elif not (line.startswith('from __future__') or line.startswith('#!') or line.startswith('# -*-')):
-                    file2.write(line)
-            file1.close()
-            file2.close()
-            self.removeFile(this)
-            result = True
+            file2 = self.open(file,'w')
+            if self.pathexists(this):
+                file1 = self.open(this, 'r')
+                for line in file1:
+                    if line.startswith('##! '):
+                        file2.write(line[4:])
+                    elif not (line.startswith('from __future__') or line.startswith('#!') or line.startswith('# -*-')):
+                        file2.write(line)
+                file1.close()
+                file2.close()
+                self.removeFile(this)
+                result = True
+            else:
+                result = False
         else:
-            result, stdout = self.shell("mkdir -p %s" % self.localInstallFolder())
-            self.removeFile(self.localInstallPath())
-            result, stdout = self.shell("cp %s %s" % ( this, self.localInstallPath()))
-            result, stdout = self.shell("chmod +x %s" % self.localInstallPath())
+            folder=self.localInstallFolder()
+            self.mkdir(folder)
+            file=self.localInstallPath()
+            self.removeFile(file)
+            if self.pathexists(this):
+                file1 = self.open(this, 'r')
+                file2 = self.open(os.path.realpath(file),'w')
+                for line in file1:
+                    if line.startswith('#!/bin/sh'):
+                        file2.write('#!%s\n' % sys.executable)
+                    else:
+                        file2.write(line)
+                file1.close()
+                file2.close()
+                self.removeFile(this)
+                result, stdout = self.shell("chmod +x %s" % file)
+                result = True
+            else:
+                self.msg_download_not_found(this)
+                result = False
             if this.startswith('/tmp'):
                 self.removeFile(this)
-        startSh =  ""
         if self.osVersion() == 'macOS':
             self.check_and_modify_zshenv()
-            startSh = " and 'source ~/.zshenv'"
         elif self.osVersion() != 'Alpine' :
             if self.shellCmd() == '/bin/bash':
                 self.check_and_modify_bashrc()
-                startSh =  " and 'source ~/.bashrc'"
             elif self.shellCmd() == '/bin/ash':
                 self.check_and_modify_bashrc()
-            elif self.shellCmd() == 'cmd':
-                startSh =  " and logout and login again"
-                startSh = ""
-        if result and verbal:
-            if self.shellCmd() == '/bin/bash':
-                self.safeMsg("Installed Locally! \n  Please type 'hash -r'%s to refresh bash shell hash!\n  Then, you can type '%s' to run!" 
-                    % (startSh, self.appName()), "SELF INSTALL")
-            elif self.shellCmd() == '/bin/ash':
-                self.safeMsg("Installed Locally! \n  Please type 'hash -r'%s to refresh ash shell hash!\n  Then, you can type '%s' to run!" 
-                    % (startSh, self.appName()), "SELF INSTALL")
-            elif self.shellCmd() == '/bin/zsh':
-                self.safeMsg("Installed Locally! \n  Please type 'hash -r'%s to refresh zsh shell hash!\n  Then, you can type '%s' to run!" 
-                    % (startSh, self.appName()), "SELF INSTALL")
-            elif self.shellCmd() == '/bin/sh':
-                self.safeMsg("Installed Locally! \n  Please login again to update!\n  Then, you can type '%s' to run!" 
-                    % (startSh, self.appName()), "SELF INSTALL")
-            elif self.shellCmd() == 'cmd':
-                self.safeMsg("Installed Locally! \n  You can type '%s.bat' to run!" 
-                    % (self.appName()), "SELF INSTALL")
+        if result:
+            if verbal:
+                if self.targetApp() == '':
+                    self.msg_install_app_local()
+                else:
+                    self.msg_install_target_local()
         return result
 
     def __message__(self,message=None):
@@ -216,7 +283,7 @@ class AppBase(object):
 
     def __self_install__(self, this=None, verbal = True):
         if this is None:
-            this = self.this()
+            this = self.thisFile()
         result = False
         try_global = True
         if self.username() != 'root':
@@ -230,42 +297,45 @@ class AppBase(object):
                 result = False
                 if try_global:
                     if self.osVersion() == 'Alpine':
-                        self.infoMsg("Alpine Detected!", "OPERATION SYSTEM")
-                        self.criticalMsg("You should be root or sudo to install globally.", "SUDO FAILED")
+                        self.msg_alpine_detected()
+                        self.msg_sudo_failed()
                         result = False
                     elif self.sudo_test():
                         result, stdout = self.shell("sudo cp %s %s" % (this, self.globalInstallPath()))
                         result, stdout = self.shell("sudo chmod +x %s" % self.globalInstallPath())
                     else:
-                        self.criticalMsg("You should be root or sudo to install globally.", "SUDO FAILED")
+                        self.msg_sudo_failed()
                         result = False
         else:
-            result, stdout = self.shell("cp %s %s" % ( this, self.globalInstallPath()))
-            result, stdout = self.shell("chmod +x %s" % self.globalInstallPath())
+            file = self.globalInstallPath()
+            if self.pathexists(this):
+                file1 = self.open(this, 'r')
+                file2 = self.open(os.path.realpath(file),'w')
+                for line in file1:
+                    if line.startswith('#!/bin/sh'):
+                        file2.write('#!%s\n' % sys.executable)
+                    else:
+                        file2.write(line)
+                file1.close()
+                file2.close()
+                self.removeFile(this)
+                result, stdout = self.shell("chmod +x %s" % file)
+            else:
+                self.msg_download_not_found(file)
+                result = False
         if result:
             if try_global and verbal:
-                if self.shellCmd() == '/bin/bash':
-                    self.safeMsg("Installed Globally! \n  You can type '%s' to run!" 
-                        % ( self.appName()), "SELF INSTALL")
-                elif self.shellCmd() == '/bin/ash':
-                    self.safeMsg("Installed Globally! \n  You can type '%s' to run!" 
-                        % (self.appName()), "SELF INSTALL")
-                elif self.shellCmd() == '/bin/zsh':
-                    self.safeMsg("Installed Globally! \n  You can type '%s' to run!" 
-                        % (self.appName()), "SELF INSTALL")
-                elif self.shellCmd() == 'cmd':
-                    self.safeMsg("Installed Globally! \n  You can type '%s.bat' to run!" 
-                        % (self.appName()), "SELF INSTALL")
+                self.msg_install_app_global()
         return result
 
     def __self_install_globally__(self, verbal = True):
         if self.sudo_test():
-            return self.__self_install__(self.this(), verbal)
+            return self.__self_install__(self.thisFile(), verbal)
         elif self.username() != 'root':
-            self.criticalMsg("You must be root to continue installation!", "SELF INSTALL")
+            self.msg_root_continue()
             return False
         else:
-            return self.__self_install__(self.this(), verbal)
+            return self.__self_install__(self.thisFile(), verbal)
 
     def __tag__(self, tag=None):
         if tag is not None:
@@ -355,7 +425,7 @@ class AppBase(object):
             "PATH=$PATH:~/.local/bin\n"
         ]
         
-        with open(self.bashrc(), "a") as file:
+        with self.open(self.bashrc(), "a") as file:
             file.write("\n".join(modification_lines))
         self.shell('chmod +x %s' % self.bashrc())
 
@@ -366,7 +436,7 @@ class AppBase(object):
             "path+=('%s')" %  os.path.join(self.home(), ".local/bin"),
             "export PATH\n"
         ]
-        with open(self.zshenv(), "a") as file:
+        with self.open(self.zshenv(), "a") as file:
             file.write("\n".join(modification_lines))
 
     def allowInstallLocal(self, installLocal=None):
@@ -377,21 +447,54 @@ class AppBase(object):
             self.__allowInstallLocal__=False
         return self.__allowInstallLocal__
 
+    def appExec(self):
+        if not hasattr(self, '__app_path__'):
+            self.appPath()
+        if not hasattr(self, '__app_exec__'):
+            self.__app_exec__ = ''
+            if self.isLocal() or self.isGlobal():
+                if self.isCmd() or self.isGitBash():
+                    self.__app_exec__ = self.appName() + '.bat'
+                else:
+                    self.__app_exec__ = self.appName()
+            elif self.appPath() != '' :
+                if self.isCmd() or self.isGitBash():
+                    self.__app_exec__ = self.appName() + '.bat'
+                elif self.isLinuxShell():
+                    self.__app_exec__='./' + self.appName()
+                else:
+                    self.__app_exec__='./' + self.appName()
+        return self.__app_exec__
+
+    def fromPipe(self):
+        return self.thisFile() == '<stdin>'
+
     def appPath(self, path=None):
         if path is not None:
-            self.__appPath__=path
+            self.__app_path__=path
             return self
-        elif not hasattr(self,'__appPath__'):
-            self.__appPath__=''
-        return self.__appPath__
+        elif not hasattr(self,'__app_path__'):
+            self.__app_path__=''
+            if not self.fromPipe() and self.thisFile() != '':
+                appPath = os.path.abspath(self.thisFile())
+                if not appPath.startswith(self.globalInstallRoot()):
+                    if self.comparePath(appPath, '%s/%s' % (os.getcwd(),appPath.split("/")[-1])):
+                        self.__app_path__="./%s" % appPath.split("/")[-1]
+                    elif self.comparePath(appPath, self.which()):
+                        self.__app_path__=appPath.split("/")[-1]
+                    else:
+                        self.__app_path__=appPath
+                else:
+                    self.__app_path__=appPath.split("/")[-1]
+        return self.__app_path__
 
     def arch(self):
         if not hasattr(self, '__arch__'):
-            if self.shellCmd() == 'cmd':
+            if self.isCmd():
                 self.__arch__ = 'amd64'
             else:
-                result2, stdout2 = self.shell("uname -a")
-                result, stdout = self.shell("uname -m")
+                result2, stdout2 = self.uname_a()
+                result, stdout = self.uname_m()
                 if result:
                     self.__arch__ = stdout.strip()
                     # "aarch64" and "arm64" are the same thing. AArch64 is the official name for the 64-bit ARM architecture, 
@@ -470,12 +573,12 @@ class AppBase(object):
                 self.pythonName( "pypy3")
             else:
                 self.pythonName( "pypy" )
+        if platform.libc_ver()[0]!='':
+                self.libcName( platform.libc_ver()[0] )
         if 'AMD64' in gcc:
             self.__arch__ = 'amd64'
             if 'MSC' in gcc:
                 self.libcName('msc')
-            elif platform.libc_ver()[0]!='':
-                self.libcName( platform.libc_ver()[0] )
         elif 'AMD32' in gcc:
             self.libcName('msc')
             self.__arch__ = 'x86'
@@ -493,6 +596,12 @@ class AppBase(object):
                 self.binaryVersion('%s-' % (self.arch()))
             else:
                 self.binaryVersion('%s-%s' % (self.arch(), self.libcName()))
+
+    def checkUpdate(self):
+        if self.need_update():
+            self.msg_latest_available()
+        elif self.latest_version() != '0.0':
+            self.msg_latest()
 
     def cmd(self, cmd=None):
         if cmd is not None:
@@ -528,8 +637,95 @@ class AppBase(object):
             .__coloredMsg__(AppBase.ITALICS + AppBase.LIGHT_AMBER) \
             .__tagMsg__(AppBase.FLASHING + AppBase.LIGHT_RED,\
             AppBase.LIGHT_AMBER)
-        self.print("%s" % (self.__formattedMsg__()))
+        self.prn("%s" % (self.__formattedMsg__()))
         return self
+
+    def curl_cmd(self, url='', file='', switches='-fsSL',  ignoreErr=True):
+        stderr = 'Unknown Error'
+        stdout = ''
+        if self.isLinuxShell():
+            curl = self.which_cmd('curl')
+            if url!='' and file!='':
+                stdout,stderr = Popen([curl,switches,'-o',file, url],stdin=PIPE,stdout=PIPE,\
+                    stderr=PIPE,universal_newlines=True).communicate('\n')
+            elif url!='':
+                stdout,stderr = Popen([curl,switches,url],stdin=PIPE,stdout=PIPE,\
+                    stderr=PIPE,universal_newlines=True).communicate('\n')
+        elif self.isGitBash():
+            winpty = self.where_cmd('winpty.exe')
+            curl = self.where_cmd('curl.exe')
+            if url!='' and file!='':
+                file=self.path_to_dos(file)
+                stdout,stderr = Popen([winpty,curl,switches,'-o',file, url],stdin=PIPE,stdout=PIPE,\
+                    stderr=PIPE,universal_newlines=True).communicate('\n')
+                if stderr.strip().lower() == 'stdin is not a tty':
+                    stdout,stderr = Popen([curl,switches,'-o',file, url],stdin=PIPE,stdout=PIPE,\
+                        stderr=PIPE,universal_newlines=True).communicate('\n')
+            elif url!='':
+                stdout,stderr = Popen([winpty,curl,switches,url],stdin=PIPE,stdout=PIPE,\
+                    stderr=PIPE,universal_newlines=True).communicate('\n')
+                if stderr.strip().lower() == 'stdin is not a tty':
+                    stdout,stderr = Popen([curl,switches,url],stdin=PIPE,stdout=PIPE,\
+                        stderr=PIPE,universal_newlines=True).communicate('\n')
+        elif self.isCmd():
+            curl = self.where_cmd('curl.exe')
+            if url!='' and file!='':
+                stdout,stderr = Popen([curl,switches,'-o',file, url],stdin=PIPE,stdout=PIPE,\
+                    stderr=PIPE,universal_newlines=True).communicate('\n')
+            elif url!='':
+                stdout,stderr = Popen([curl,switches,url],stdin=PIPE,stdout=PIPE,\
+                    stderr=PIPE,universal_newlines=True).communicate('\n')
+        elif url!='':
+            # Assume /bin/sh as default shell
+            curl = self.which_cmd('curl')
+            if url!='' and file!='':
+                stdout,stderr = Popen([curl,switches,'-o',file, url],stdin=PIPE,stdout=PIPE,\
+                    stderr=PIPE,universal_newlines=True).communicate('\n')
+            elif url!='':
+                stdout,stderr = Popen([curl,switches,url],stdin=PIPE,stdout=PIPE,\
+                    stderr=PIPE,universal_newlines=True).communicate('\n')
+        if stderr != "" and not ignoreErr:
+            self.msg_error(command, stderr)
+            return False, stderr
+        return True, stdout
+
+    def curl_download(self, url='', file='', ignoreErr=True):
+        if self.curl_is_200(url):
+            self.curl_cmd(url=url, file=file, ignoreErr=ignoreErr)
+            if file == '':
+                return True
+            if file !='' and not self.pathexists(file):
+                count=20
+                # In gitbash, downloading time may be longer
+                self.msg_downloading(file)
+                while count>0 and  not self.pathexists(file):
+                    count = count - 1
+                    time.sleep(1) # wait for curl download the file
+            if file !='' and self.pathexists(file):
+                return True
+            elif ignoreErr:
+                return True
+            else:
+                self.msg_timeout(file)
+                return False
+        return False
+
+    def curl_is_200(self, url):
+        result, stdout = self.curl_cmd(url=url, switches='-fsSLI', ignoreErr=True)
+        if result:
+            result = False
+            for rawline in stdout.splitlines():
+                line = rawline.strip()
+                if 'HTTP' in line.strip():
+                    line_split=line.split(' ')
+                    if len(line_split) > 1:
+                        if  '200' == line_split[1] or '301' == line_split[1] or '302' == line_split[1]:
+                            return True
+                        else:
+                            self.msg_download_url_error(url, line_split[1])
+                            return False
+        return result
+
 
     def curPath(self, curPath=None):
         if curPath is not None:
@@ -539,25 +735,33 @@ class AppBase(object):
             self.__curPath__=os.getcwd()
         return self.__curPath__
 
+    def download_to_temp(self, url=None, file=None,verbal = False):
+        self.msg_system_check()
+        if url is None:
+            url=self.downloadUrl()
+        if file is None:
+            file=self.tempFile()
+        result = self.curl_download(url=url, file=file)
+        if not self.pathexists(file):
+            result = False
+            self.msg_download_error(file)
+        elif verbal:
+            self.msg_downloaded(file)
+        return result
+
     def download_and_install(self, verbal = True):
-        self.safeMsg("Now checking your operation system!", "START")
-        self.print("    Python: %s" % self.pythonVersion())
-        self.print("    C Library: %s" % self.libcVersion())
-        self.print("    Operation System: %s" % self.osVersion())
-        self.print("    Current User: %s" % self.username())
-        self.print("    Shell: %s" % self.shellCmd())
-        self.print("    Python Executable: %s" % self.executable())
-        self.print("    Binary Version: %s" % self.binaryVersion() )
-        self.print("")
-        fname = self.tempFile()
-        result, stdout = self.shell("curl -fsSL -o %s %s" % (fname, self.downloadUrl()), True)
-        self.print(stdout)
+        if self.targetApp() != '':
+            result = self.download_and_install_target()
+        else:
+            result=True
         if result:
-            self.this(fname)
-            if self.username() == 'root':
-                return self.__self_install__(fname, verbal)
-            else:
-                return self.__install_local__(fname, verbal)
+            fname = self.tempFile()
+            self.download_to_temp(verbal=False)
+            if self.pathexists(fname):
+                if self.username() == 'root':
+                    return self.__self_install__(fname, verbal)
+                else:
+                    return self.__install_local__(fname, verbal)
         return False
 
     def downloadHost(self):
@@ -569,27 +773,28 @@ class AppBase(object):
         else:
             ''
 
-    def downloadTarget(self):
+    def download_and_install_target(self):
         if self.targetApp() == '':
             return
-        fname = self.tempAttachment()
-        self.infoMsg("Downloading: %s" % self.targetDownloadUrl(),"DOWNLOAD FILES")
-        result, stdout = self.shell("curl -fsSL -o %s %s" % (fname, self.targetDownloadUrl()), True)
-        self.print("")
-        if os.path.exists(fname):
+        fname = self.tempTargetGzip()
+        self.download_to_temp(url=self.tempAppUrl(), file=fname, verbal=False)
+        if self.pathexists(fname):
             os.chdir(self.tempFolder())
             result, stdout = self.shell("tar -xvf %s" % fname.split('/')[-1], True)
             this = self.tempAttachDecomp()
-            if os.path.exists(this):
+            if self.pathexists(this):
                 self.this(this)
                 if self.username() == 'root':
-                    self.install_target_local(this)
+                    self.install_target_global(this)
                 else:
                     self.install_target_local(this)
+                return True
             else:
-                self.criticalMsg("File Extraction error: %s not found" % this, "DOWNLOAD ERROR")
-        else: 
-            self.criticalMsg("Download error: %s" % self.tempAttachment(), "DOWNLOAD ERROR")
+                self.msg_extraction_error(this)
+                return False
+        else:
+            self.msg_download_error(self.tempTargetGzip())
+            return False
 
     def downloadUrl(self, downloadUrl=None):
         if downloadUrl is not None:
@@ -601,15 +806,18 @@ class AppBase(object):
 
     def duplication_warning(self):
         if self.installedLocal() and self.installedGlobal():
-            self.criticalMsg("It may causes error if you have installed both local version and Global Version!\n  Please uninstall local version by,\n    %s uninstall" % self.appPath(), "INSTALLED TWICE")
+            self.msg_both_local_global()
 
     def executable(self):
-        exe = ''
+        if hasattr(self, '__executable__'): 
+            return self.__executable__
         if '/' in sys.executable:
-            exe = sys.executable.split('/')[-1]
+            self.__executable__  = sys.executable.split('/')[-1]
         elif '\\'  in sys.executable:
-            exe = sys.executable.split('\\')[-1]
-        return exe
+            self.__executable__  = sys.executable.split('\\')[-1]
+        else:
+            self.__executable__ = ''
+        return self.__executable__ 
 
     def globalInstallPath(self):
         return '%s%s' % (self.globalInstallRoot(), self.appName())
@@ -623,7 +831,7 @@ class AppBase(object):
         return self.__globalInstallRoot__
 
     def hasGlobalInstallation(self):
-        return  os.path.exists(self.globalInstallPath())
+        return  self.pathexists(self.globalInstallPath())
 
     def home(self):
         return os.path.expanduser("~")
@@ -636,8 +844,795 @@ class AppBase(object):
             self.__homepage__=None
         return self.__homepage__
 
-    def info(self, usage=""):
-        if self.shellCmd() == 'cmd':
+    def infoMsg(self,msg,tag=''):
+        self.__tag__(tag).__message__(msg) \
+            .__timeMsg__(AppBase.BOLD+AppBase.ITALICS+AppBase.DARK_BLUE) \
+            .__header__(AppBase.BOLD+AppBase.DARK_BLUE) \
+            .__coloredMsg__(AppBase.ITALICS + AppBase.LIGHT_BLUE) \
+            .__tagMsg__(AppBase.LIGHT_AMBER,AppBase.LIGHT_BLUE)
+        self.prn("%s" % (self.__formattedMsg__()))
+        return self
+
+    def install_local(self, verbal = True):
+        return self.__install_local__(self.thisFile(), verbal)
+
+    def installedGlobal(self):
+        return self.pathexists(self.globalInstallPath()) 
+
+    def installedLocal(self):
+        which = self.which()
+        if which == '' or which == self.globalInstallPath():    
+            return False    
+        return self.pathexists(self.which()) 
+
+    def install_target_global(self, this):
+        if self.targetApp() != '':
+            self.sudoRemoveFile("%s/%s" % (self.globalInstallRoot(), self.targetApp()))
+        result, stdout = self.shell("cp %s %s" % ( this, self.globalInstallRoot()))
+        result, stdout = self.shell("chmod +x %s/%s" % (self.globalInstallRoot(), self.targetApp()))
+        if result:
+            self.msg_install_target_global()
+
+    def install_target_local(self, this):
+        self.mkdir( self.localInstallFolder() )
+        if self.targetApp() != '':
+            self.removeFile("%s/%s" % (self.localInstallFolder(), self.targetApp()))
+        result, stdout = self.shell("cp %s %s" % ( this, self.localInstallFolder()))
+        result, stdout = self.shell("chmod +x %s/%s" % (self.localInstallFolder(), self.targetApp()))
+        if self.osVersion() == 'macOS':
+            self.check_and_modify_zshenv()
+        elif self.osVersion() != 'Alpine' :
+            self.check_and_modify_bashrc()
+
+    def is_bashrc_modified(self):
+        # Check if .bashrc file exists and if it contains the modification lines
+        if not os.path.isfile(self.bashrc()):
+            return False
+        
+        with self.open(self.bashrc(), "r") as file:
+            contents = file.read()
+        
+        return "# modified to add ~/.local/bin to PATH" in contents
+
+    def is_zshenv_modified(self):
+        # Check if .zshenv file exists and if it contains the modification lines
+        if not os.path.isfile(self.zshenv()):
+            return False
+        
+        with self.open(self.zshenv(), "r") as file:
+            contents = file.read()
+        
+        return "# modified to add ~/.local/bin to PATH" in contents
+
+    def isCmd(self):
+        if not hasattr(self, '__is_cmd__'):
+            if not hasattr(self, '__shell_cmd__'):
+                self.shellCmd()
+            self.__is_cmd__ = self.__shell_cmd__.split('\\')[-1] == 'cmd.exe' 
+        return self.__is_cmd__
+
+    def isGitBash(self):
+        if not hasattr(self, '__is_gitbash__'):
+            if not hasattr(self, '__shell_cmd__'):
+                self.shellCmd()
+            self.__is_gitbash__ = self.__shell_cmd__.split('\\')[-1] == 'bash.exe' 
+        return self.__is_gitbash__
+
+    def isGlobal(self):
+        if not hasattr(self,'__is_global__'):
+            self.__is_global__ = self.thisFile() == self.globalInstallPath()
+        return self.__is_global__
+
+    def isLinuxShell(self):
+        return self.shellCmd() == '/bin/bash' or self.shellCmd() == '/bin/zsh' or \
+            self.shellCmd() == '/bin/sh' or self.shellCmd() == '/bin/ash' or \
+            self.shellCmd() == '/usr/bin/fish'
+
+    def isLocal(self):
+        if not hasattr(self, '__is_local__'):
+            self.__is_local__=self.thisFile() == self.localInstallPath()
+        return self.__is_local__
+
+    def isSudo(self, sudo=None):
+        if sudo is not None:
+            self.__isSudo__=sudo
+            return self
+        elif not hasattr(self, '__isSudo__'):
+            self.__isSudo__=False
+        return self.__isSudo__
+
+    def latest_version(self):
+        useRequest = False
+        try:
+            if not hasattr(self,'__latest_version__'):
+                majorVersion = 0
+                minorVersion = 0
+                lines = []
+                result, stdout = self.curl_cmd( url=self.downloadUrl())
+                if result:
+                    lines = stdout.splitlines()
+                for line in lines:
+                    if 'setInstallation' in line and self.appName() in line:
+                        for token in line.split(')')[0].split(','):
+                            if 'majorVersion' in token:
+                                majorVersion = int(token.split('=')[1])
+                            if 'minorVersion' in token:
+                                minorVersion = int(token.split('=')[1])
+                self.__latest_version__="%d.%d" % (majorVersion,minorVersion)
+                if majorVersion > self.majorVersion() or (majorVersion == self.majorVersion() and minorVersion> self.minorVersion()):
+                    self.__need_update__=True
+        except:
+            self.msg_no_server()
+        if not hasattr(self,'__latest_version__'):
+            self.__latest_version__='0.0'
+        return self.__latest_version__
+
+    def lastUpdate(self, lastUpdate=None):
+        if lastUpdate is not None:
+            self.__lastUpdate__=lastUpdate
+            return self
+        elif not hasattr(self,'__lastUpdate__'):
+            self.__lastUpdate__=None
+        return self.__lastUpdate__
+
+    def libcName(self, name=None):
+        if name is not None:
+            self.__libc_name__ = name
+            return self
+        elif not hasattr(self, '__libc_name__'):
+            self.__libc_name__ = ''
+        return self.__libc_name__
+
+    def libcVersion(self, version=None):
+        if version is not None:
+            self.__libc_version__ = version
+            return self
+        elif not hasattr(self, '__libc_version__'):
+            self.__libc_version__ = ''
+        return self.__libc_version__
+
+    def linuxDistro(self):
+        if not hasattr(self, '__distro__'):
+            self.__distro__=''
+            if os.path.isfile("/etc/os-release"):
+                fin = self.open("/etc/os-release", "rt")
+                self.__distro__ = ''
+                for line in fin:
+                    if line.startswith('PRETTY_NAME='):
+                        self.__distro__ = line.split('"')[1]
+                if 'Alpine' in self.__distro__:
+                    self.shellCmd("/bin/ash")
+        return self.__distro__
+
+    def local(self):
+        return socket.gethostname()
+
+    def localInstallFolder(self):
+        if self.isCmd() or self.isGitBash():
+            return 'C:\\Users\\%s\\AppData\\Local\\Microsoft\\WindowsApps' % self.username()
+        else:  
+            return os.path.abspath('%s/.local/bin' % self.home())
+
+    def localInstallPath(self):
+        if self.isCmd() or self.isGitBash():
+            return '%s\\%s.bat' % (self.localInstallFolder(), self.appName())
+        else:
+            return os.path.abspath('%s/%s' % (self.localInstallFolder(), self.appName()))
+
+    def majorVersion(self, majorVersion=None):
+        if majorVersion is not None:
+            self.__majorVersion__=majorVersion
+            return self
+        elif not hasattr(self,'__majorVersion__'):
+            self.__majorVersion__=0
+        return self.__majorVersion__
+
+    def minorVersion(self, minorVersion=None):
+        if minorVersion is not None:
+            self.__minorVersion__=minorVersion
+            return self
+        elif not hasattr(self,'__minorVersion__'):
+            self.__minorVersion__=0
+        return self.__minorVersion__
+
+    def mkdir(self, path):
+        path = os.path.realpath(path)
+        if not self.pathexists( path ):
+            if self.osVersion() == 'windows':
+                dir_split = path.split('\\')
+                dirloc = dir_split[0]
+                for dirlet in dir_split[1:]:
+                    if dirlet != '':
+                        dirloc = dirloc + '\\' + dirlet
+                        if not self.pathexists(dirloc):
+                            os.mkdir( dirloc )
+            else:
+                dir_split = path.split('/')
+                dirloc = ''
+                for dirlet in dir_split:
+                    if dirlet != '':
+                        dirloc = dirloc + '/' + dirlet
+                        if not self.pathexists(dirloc):
+                            os.mkdir( dirloc )
+
+    def need_update(self):
+        if not hasattr(self,'__need_update__'):
+            self.__need_update__=False
+            self.latest_version()
+        return self.__need_update__
+
+    def now(self):
+        return str(datetime.now())
+
+    def open(self, fname, sw):
+        if self.isGitBash() or self.isCmd():
+            fname = self.path_to_dos(fname)
+        return open(fname, sw)
+
+    def osVersion(self):
+        if self.pathexists("/etc/os-release"):
+            self.linuxDistro()
+        if hasattr(self,'__distro__'):
+            return self.__distro__
+        self.__distro__  = ''
+        if os.name == 'nt':
+            self.__distro__='windows'
+        elif self.shellCmd() != '':
+            result, stdout = self.shell("sw_vers -productName")
+            if result:
+                self.__distro__ = stdout.strip()
+        return self.__distro__
+
+    def parseArgs(self, usage, allowSelfInstall = True, allowDisplayInfo = True):
+        if self.appPath() != '' :
+            if len(sys.argv) > 1:
+                self.cmd(sys.argv[1])
+                if self.cmd() == "install" or self.cmd() == "update":
+                    self.selfInstall()
+                    return True
+                elif self.cmd() == "this":
+                    self.prn(self.this()) 
+                    return True
+                elif self.cmd() == "this-file":
+                    self.prn(self.thisFile())
+                    return True
+                elif self.cmd() == "download":
+                    self.download_to_temp(verbal=True)
+                    return True
+                elif self.cmd() == "download-app" or self.cmd() == "download-target-app":
+                    self.download_to_temp(url=self.tempAppUrl(), file=self.tempTargetGzip(), verbal=True)
+                    return True
+                elif self.cmd() == "global-installation-path":
+                    self.prn(self.globalInstallPath())
+                    return True
+                elif self.cmd() == "local-installation-path":
+                    self.prn(self.localInstallPath())
+                    return True
+                elif self.cmd() == "uninstall":
+                    self.selfUninstall()
+                    return True
+                elif self.cmd() == "check-update" or self.cmd() == "check-version"  or self.cmd() == "check":
+                    self.checkUpdate()
+                    return True
+                elif allowDisplayInfo:
+                    self.msg_info(usage)
+                    return True
+            elif allowDisplayInfo:
+                self.msg_info(usage)
+                return True
+        elif allowSelfInstall:
+            if self.fromPipe():
+                self.download_and_install()
+            else:
+                self.selfInstall()
+            return True
+        else:
+            return False
+
+    def pathexists(self, path):
+        if self.isGitBash():
+            path=self.path_to_dos(path)
+        return os.path.exists(path)
+
+    def pid(self):
+        return os.getpid()
+
+    def prn(self, msg):
+        print("%s" % msg)
+        return self
+
+    def pythonMajor(self, major=None):
+        if major is not None:
+            self.__python_major__ = major
+            return self
+        elif not hasattr(self, '__python_major__'):
+            self.__python_major__ = 0
+        return self.__python_major__
+
+    def pythonMinor(self, minor=None):
+        if minor is not None:
+            self.__python_minor__ = minor
+            return self
+        elif not hasattr(self, '__python_minor__'):
+            self.__python_minor__ = 0
+        return self.__python_minor__
+
+    def pythonName(self, name=None):
+        if name is not None:
+            self.__python_name__ = name
+            return self
+        elif not hasattr(self, '__python_name__'):
+            self.__python_name__ = 0
+        return self.__python_name__
+
+    def pythonVersion(self, version=None):
+        if version is not None:
+            self.__python_version__ = version.strip()
+            return self
+        elif  hasattr(self, '__python_version__'):
+            return self.__python_version__ 
+        self.__python_version__ = sys.version
+        if len(self.__python_version__.split('\n'))>1:
+            self.__python_version__ =  self.__python_version__.split('\n')[0].strip()
+        if len( self.__python_version__.split('['))>1:
+            self.__python_version__ =  self.__python_version__.split('[')[0].strip()
+        if len( self.__python_version__.split('('))>1:
+            self.__python_version__ =  self.__python_version__.split('(')[0].strip()
+        return self.__python_version__
+
+    def removeFile(self, filePath):
+        if self.isCmd() or self.isGitBash():
+            filePath=self.path_to_dos(filePath)
+        if self.pathexists(filePath):         
+            os.remove(filePath)
+
+    def removeFilePattern(self, dirPath, pattern):
+        if self.pathexists(dirPath) and os.path.isdir(dirPath):
+            for file in os.listdir(dirPath):
+                if file.endswith(pattern):
+                    self.removeFile("%s/%s" % (dirPath,file))
+
+    def removeFolder(self, dirPath):
+        if self.isCmd() or self.isGitBash():
+            dirPath=self.path_to_dos(dirPath)
+        if self.pathexists(dirPath) and os.path.isdir(dirPath):
+            shutil.rmtree(dirPath)
+
+    def safeMsg(self,msg,tag=''):
+        self.__tag__(tag).__message__(msg).__timeMsg__(AppBase.BOLD + AppBase.ITALICS + \
+            AppBase.DARK_TURQUOISE) \
+            .__header__(AppBase.BOLD + AppBase.DARK_TURQUOISE) \
+            .__coloredMsg__(AppBase.ITALICS + AppBase.LIGHT_TURQUOISE) \
+            .__tagMsg__(AppBase.LIGHT_GREEN,AppBase.LIGHT_TURQUOISE)
+        self.prn("%s" % (self.__formattedMsg__()))
+        return self
+
+    def selfInstall(self, verbal = True):
+        if self.isGlobal():
+            if self.need_update():
+                self.msg_old_global()
+                if self.ask_update():
+                    return self.download_and_install(verbal)
+            else:
+                self.msg_latest_global()
+                return False
+        elif self.isLocal():
+            if self.need_update():
+                self.msg_old_local()
+                if self.ask_update():  
+                    return self.download_and_install(verbal)
+            else:
+                self.msg_latest_local()
+                return False
+        elif self.installedGlobal():
+            self.msg_global_already()
+            if self.ask_overwrite_global():
+                return self.__self_install__(self.thisFile(), verbal)
+        elif self.installedLocal():
+            self.msg_local_already()
+            if self.ask_overwrite_local():  
+                return self.install_local(verbal)
+        elif self.username() != 'root':
+            if self.ask_local():
+                return self.install_local(verbal)
+        else:
+            return self.__self_install_globally__(verbal)
+
+    def selfLocation(self):
+        if self.thisFile() != '':
+            return self.thisFile()
+        try:
+            shell = get_ipython().__class__.__name__
+            if shell == 'ZMQInteractiveShell':
+                return "Jupyter"
+            elif shell == 'TerminalInteractiveShell':
+                return "IPython"
+            else:
+                return "Unknown location"
+        except NameError:
+            return "Unknown location" 
+        
+    def selfUninstallGlobal(self, verbal = True):
+        if self.installedGlobal():
+            result = False
+            if self.username() != 'root':
+                if self.sudo_test():
+                    self.sudoRemoveFile(self.globalInstallPath())
+                    result = True
+                else:
+                    self.msg_unintall_need_root()
+            else:
+                self.removeFile(self.globalInstallPath())
+                result = True
+            if result:
+                if self.targetApp() != '':
+                    self.removeFile("%s/%s" % (self.globalInstallRoot(), self.targetApp()))
+                if verbal:
+                    self.msg_unintall_global()
+            else:
+                self.msg_global_failed()
+            return result
+        else:
+            self.msg_no_global()
+        return False
+
+    def selfUninstall(self, verbal=True):
+        if self.installedLocal():
+            self.selfUninstallLocal(verbal)
+        elif self.installedGlobal():
+            self.selfUninstallGlobal(verbal)
+        else:
+            self.msg_no_installation()    
+
+    def selfUninstallLocal(self, verbal = True):
+        if self.installedLocal():
+            self.removeFile(self.localInstallPath())
+            if not os.path.exists(self.localInstallPath()):
+                if self.targetApp() != '':
+                    self.removeFile("%s/%s" % (self.localInstallFolder(), self.targetApp()))
+                if verbal:
+                    self.msg_uninstall_local()
+                return True
+            else:
+                self.msg_uninstall_local_failed()
+                return False
+        else:
+            self.msg_no_local()
+            return False
+
+    def setInstallation(self,appName='',author='',lastUpdate='',homepage='',downloadUrl="",majorVersion=0,minorVersion=0):
+        signal.signal(signal.SIGINT, self.signal_handler)
+        self.checkSystem()
+        self.author( author )
+        self.appName( appName )
+        self.downloadUrl( downloadUrl )
+        self.homepage( homepage )
+        self.lastUpdate( lastUpdate )
+        self.majorVersion( majorVersion )
+        self.minorVersion( minorVersion )
+
+    def shell(self, command, ignoreErr=False):
+        stderr = ''
+        stdout = ''
+        if self.isLinuxShell() or self.isGitBash():
+            stdout,stderr = Popen([self.shellCmd(),'-c',command],stdin=PIPE,stdout=PIPE,\
+                stderr=PIPE,universal_newlines=True).communicate('\n')
+        elif self.isCmd():
+            stdout,stderr = Popen([self.shellCmd(),'/c',command],stdin=PIPE,stdout=PIPE,\
+                stderr=PIPE,universal_newlines=True).communicate('\n')
+        else:
+            # Assume /bin/sh as default shell
+            stdout,stderr = Popen(['/bin/sh','-c',command],stdin=PIPE,stdout=PIPE,\
+                stderr=PIPE,universal_newlines=True).communicate('\n')
+        if stderr != "" and not ignoreErr:
+            self.msg_error(command, stderr)
+            return False, stderr
+        else:
+            return True, stdout
+
+    def shellCmd(self, cmd=None):
+        if cmd is not None:
+            self.__shell_cmd__=cmd
+            return self
+        elif not hasattr(self,'__shell_cmd__'):
+            if 'SHELL' in os.environ:
+                self.__shell_cmd__ = os.environ['SHELL']
+                # cannot use self.pathexists to avoid recursive call
+            elif os.path.exists('/usr/bin/fish'):
+                self.__shell_cmd__ = '/usr/bin/fish'
+            elif os.path.exists('/bin/bash'):
+                self.__shell_cmd__ = '/bin/bash'
+            elif os.path.exists('/bin/ash'):
+                self.__shell_cmd__ = '/bin/ash'
+            elif os.path.exists('/bin/zsh'):
+                self.__shell_cmd__ = '/bin/zsh'
+            elif os.path.exists('/bin/sh'):
+                self.__shell_cmd__ = '/bin/sh'
+            elif os.path.exists('C:\\Windows\\System32\\cmd.exe'):
+                self.__shell_cmd__ = 'C:\\Windows\\System32\\cmd.exe'
+            else:
+                self.__shell_cmd__=''
+        return self.__shell_cmd__
+
+    def signal_handler(self, sig, frame):
+        self.prn('\nYou pressed Ctrl+C!')
+        sys.exit(0)
+
+    def sudo_test(self,msg='.'):
+        distro = self.osVersion()
+        if distro == 'windows':
+            self.isSudo(False)
+            return False
+        if self.isSudo():
+            return True
+        if distro.startswith('Alpine'):
+            stdout,stderr = Popen([ self.shellCmd(), '-c' , "which sudo" ],\
+                stdin=PIPE,stdout=PIPE,stderr=PIPE,universal_newlines=True)\
+                .communicate( '\n' )
+            if stdout=='':
+                return False
+        stdout,stderr = Popen([ self.shellCmd(), '-c' , "sudo echo %s" % msg ],\
+            stdin=PIPE,stdout=PIPE,stderr=PIPE,universal_newlines=True)\
+            .communicate( '\n' )
+        trial=0
+        while stdout.strip() != msg.strip() and trial < 3:
+            sudoPassword=getpass.getpass( 'Please input "sudo" password for %s: ' % self.username() )
+            stdout, stderr = Popen([ self.shellCmd() , '-c',"sudo echo %s" % msg ] \
+                ,stdin=PIPE,stdout=PIPE,stderr=PIPE,\
+                universal_newlines=True ).communicate( "%s\n" % sudoPassword )
+            trial=trial + 1
+        if trial < 3:
+            self.isSudo( True )
+        return self.isSudo()
+
+    def sudoRemoveFile(self, filePath):
+        self.shell( 'sudo rm -rf %s' % filePath )
+
+    def tag(self, tag=None):
+        if tag is not None:
+            self.__TAG__=tag
+            return self
+        elif not hasattr( self, '__TAG__' ):
+            self.__TAG__=''
+        return self.__TAG__
+
+    def targetApp(self, app=None):
+        if app is not None:
+            self.__target_app__=app
+            return self
+        elif not hasattr( self, '__target_app__' ):
+            self.__target_app__=''
+        return self.__target_app__
+
+    def tempAppUrl(self):
+        if self.downloadUrl()[-1] == '/':
+            return "%s%s/%d.%d/%s.tar.gz" % (self.downloadUrl(), self.binaryVersion(), self.majorVersion(),self.minorVersion(), self.targetApp())
+        else:
+            return "%s/%s/%d.%d/%s.tar.gz" % (self.downloadUrl(), self.binaryVersion(), self.majorVersion(),self.minorVersion(), self.targetApp())
+
+    def tempTargetGzip(self):
+        timestamp = self.timestamp()
+        if self.isLinuxShell():
+            return "%s/%s-%s.tar.gz" % (self.tempFolder(), self.targetApp(), timestamp)
+        elif self.isGitBash() or self.isCmd():
+            return "%s\%s-%s.tar.gz" % (self.tempFolder(), self.targetApp(), timestamp)
+        return "%s/%s-%s.tar.gz" % (self.tempFolder(), self.targetApp(), timestamp)
+
+    def tempAttachDecomp(self):
+        if self.isCmd():
+            fname="%s\\%s" % (self.tempFolder(),self.targetApp())
+        elif self.isGitBash():
+            fname="%s/%s" % (self.tempFolder(),self.targetApp())
+        else:
+            fname="%s/%s" % (self.tempFolder(), self.targetApp())
+        return fname
+
+    def tempFile(self):
+        if self.isCmd():
+            fname="%s\\%s-%s.bat" % (self.tempFolder(), self.appName(),self.timestamp())
+        elif self.isGitBash():
+            # GitBash download location should remain the same such that starting with /c/Users/user...
+            fname="%s/%s-%s.bat" % (self.tempFolder(), self.appName(),self.timestamp())
+        else:
+            fname="%s/%s-%s" % (self.tempFolder(), self.appName(),self.timestamp())
+        return fname
+
+    def tempFolder(self):
+        if self.isGitBash():
+            folder="/C/Users/%s/AppData/Local/Temp" % self.username()
+        elif 'TEMP' in os.environ:
+            folder=os.environ['TEMP']
+        elif self.isCmd():
+            folder="C:\\Users\\%s\\AppData\\Local\\Temp" % self.username()
+        elif self.username() == 'root':
+            folder="/tmp" 
+        elif self.osVersion() == 'macOS':
+            folder = '/Users/%s/Library/Caches' % self.username()
+        else:
+            folder="/home/%s/.local/temp" % self.username()
+            self.mkdir(folder)
+        return folder
+
+    def this(self, this = None):
+        if this is None :
+            if not hasattr(self, '__this__'):
+                self.__this__=self.appPath()
+            return self.__this__
+        else:
+            self.__this__ = this
+            return self
+
+    @staticmethod
+    def thisFile():
+        return AppBase.__here__
+
+    def timestamp(self):
+        return "%s" % (int(time.time()))
+
+    def where_cmd(self, cmd):
+        stdout = ''
+        if self.isCmd() or self.isGitBash():
+            result, stdout = self.shell("where %s" % cmd, ignoreErr=True)
+            result = ''
+            final = ''
+            for line in stdout.splitlines():
+                result = line.strip()
+                if 'Windows' in result and 'System32' in result:
+                    final = result
+            if final == '':
+                final = result
+            return final
+        if self.isLinuxShell():
+            return self.which_cmd(cmd)
+
+    def which(self):
+        if self.pathexists('/usr/bin/which'):
+            return self.which_cmd( self.appName())
+        elif self.pathexists('C:\\Windows\\System32\\where.exe'):
+            return self.which_cmd( self.appName())
+        elif self.pathexists(self.localInstallPath()):
+            return self.localInstallPath()
+        elif self.pathexists(self.globalInstallPath()):
+            return self.globalInstallPath()
+        else:
+            return ""
+
+    def which_cmd(self, cmd):
+        stdout = ''
+        if self.isCmd() or self.isGitBash():
+            return self.where_cmd(cmd)
+        elif self.isLinuxShell():
+            if self.pathexists('/usr/bin/which'):
+                result, stdout = self.shell("/usr/bin/which %s" % cmd, ignoreErr=True)
+                return stdout.strip()
+            elif self.pathexists('/bin/which'):
+                result, stdout = self.shell("/usr/bin/which %s" % cmd, ignoreErr=True)
+                return stdout.strip()
+            elif self.pathexists('/bin/%s' % cmd):
+                return '/bin/%s' % cmd
+            elif self.pathexists('/usr/bin/%s' % cmd):
+                return '/usr/bin/%s' % cmd
+            elif self.pathexists('/usr/bin/local/%s' % cmd):
+                return '/usr/bin/local/%s' % cmd
+            elif self.pathexists('/home/%s/.local/bin/%s' % [self.username(), cmd]):
+                return '/home/%s/.local/bin/%s' % [self.username(), cmd]
+            elif 'PATH' in os.environ:
+                split_path = os.environ['PATH'].split(':')
+                for pathlet in split_path:
+                    if self.pathexists('%s/%s' % [pathlet, cmd]):
+                        return '%s/%s' % [pathlet, cmd]
+        return ''
+
+    def uname(self, switch, ignoreErr=True):
+        stderr = ''
+        stdout = ''
+        command = 'uname %s' % switch
+        if self.isLinuxShell():
+            uname = self.which_cmd('uname')
+            stdout,stderr = Popen([uname,switch],stdin=PIPE,stdout=PIPE,\
+                stderr=PIPE,universal_newlines=True).communicate('\n')
+        if self.isGitBash():
+            winpty = self.where_cmd('winpty.exe')
+            uname = self.where_cmd('uname')
+            stdout,stderr = Popen([winpty, uname,switch],stdin=PIPE,stdout=PIPE,\
+                stderr=PIPE,universal_newlines=True).communicate('\n')
+            if stderr.strip().lower() == 'stdin is not a tty':
+                stdout,stderr = Popen([uname,switch],stdin=PIPE,stdout=PIPE,\
+                    stderr=PIPE,universal_newlines=True).communicate('\n')
+        elif self.isCmd():
+            stdout,stderr = Popen([self.shellCmd(),'/c',command],stdin=PIPE,stdout=PIPE,\
+                stderr=PIPE,universal_newlines=True).communicate('\n')
+        else:
+            # Assume /bin/sh as default shell
+            uname = self.which_cmd('uname')
+            stdout,stderr = Popen([uname,switch],stdin=PIPE,stdout=PIPE,\
+                stderr=PIPE,universal_newlines=True).communicate('\n')
+        if stderr != "" and not ignoreErr:
+            self.msg_error(command, stderr)
+            return False, stderr
+        else:
+            return True, stdout
+
+    def uname_a(self, ignoreErr=True):
+        return self.uname('-a')
+
+    def uname_m(self, ignoreErr=True):
+        return self.uname('-m')
+
+    def useColor(self, color=None):
+        if color is not None:
+            self.__useColor__=color
+            return self
+        elif not hasattr(self, '__useColor__'):
+            if self.isGitBash():
+                # Gitbash cannot show color
+                self.__useColor__=False
+            else:
+                self.__useColor__=True
+        return self.__useColor__
+
+    def userID(self):
+        return os.getuid()
+
+    def username(self):
+        if pwd is None:
+            return os.getlogin()
+        return pwd.getpwuid(self.userID())[0]
+
+    def version(self):
+        return "%s.%s" % (self.majorVersion(),self.minorVersion())
+
+    def zshenv(self):
+        return os.path.join(self.home(), ".zshenv")
+
+    def ask_local(self):
+        return 'yes' == self.__ask_yesno__('Do you want to install locally? (yes/no) ')
+
+    def ask_overwrite_global(self):
+        return 'yes' == self.__ask_yesno__('Do you want to overwrite the global installation? (yes/no) ')
+
+    def ask_overwrite_local(self):
+        return 'yes' == self.__ask_yesno__('Do you want to overwrite the local installation? (yes/no) ')
+
+    def ask_update(self):
+        return 'yes' == self.__ask_yesno__('Do you want to update the latest (%s) from internet? (yes/no) ' % self.latest_version())
+
+    def msg_alpine_detected(self):
+        self.infoMsg("Alpine Detected!", "OPERATION SYSTEM")
+
+    def msg_both_local_global(self):
+        self.criticalMsg("It may causes error if you have installed both local version and Global Version!\n  Please uninstall local version by,\n    %s uninstall" % self.appPath(), "INSTALLED TWICE")
+
+    def msg_download_error(self, file):
+        if not hasattr(self,'__msgshown_download_error__'):
+            self.criticalMsg("Download file error: %s" % file, "DOWNLOAD ERROR")
+            self.__msgshown_download_error__=True
+
+    def msg_download_url_error(self, url, code):
+        if not hasattr(self,'__msgshown_download_error__'):
+            self.criticalMsg("Url: %s\n  HTTP code: %s" % (url, code), "DOWNLOAD ERROR")
+            self.__msgshown_download_error__=True
+
+    def msg_download_not_found(self, file):
+        self.criticalMsg("Downloaded File: %s" % file, "NOT FOUND")
+
+    def msg_downloaded(self, fname):
+        self.safeMsg("File downloaded to: %s" % fname, "DOWNLOADED")
+
+    def msg_downloading(self, url):
+        self.infoMsg("Downloading: %s ..." % url,"DOWNLOAD FILES")
+
+    def msg_error(self, command, stderr):
+        self.criticalMsg("Error in %s: %s" % (command, stderr), "ERROR")
+
+    def msg_extraction_error(self, file):
+        self.criticalMsg("File Extraction error: %s not found" % file, "DOWNLOAD ERROR")
+
+    def msg_global_already(self):
+        self.infoMsg("Global Installation installed already!", "SELF INSTALL")
+
+    def msg_info(self, usage=""):
+        if self.isCmd():
             msg1="%s.bat (%s.%s) by %s on %s" % (self.appName(),self.majorVersion(),\
                 self.minorVersion(),self.author(),self.lastUpdate())
         else:
@@ -695,631 +1690,134 @@ class AppBase(object):
             starLine.append("*")
         for i in range(1,maxLen + 1):
             space.append(" ")
-        print(''.join(starLine))
-        print('* %s *' % ''.join(space))
+        self.prn(''.join(starLine))
+        self.prn('* %s *' % ''.join(space))
         for n in range(0, max_line):
-            print('* %s *' % msg[n])
-        print('* %s *' % ''.join(space))
-        print(''.join(starLine))
+            self.prn('* %s *' % msg[n])
+        self.prn('* %s *' % ''.join(space))
+        self.prn(''.join(starLine))
 
-    def infoMsg(self,msg,tag=''):
-        self.__tag__(tag).__message__(msg) \
-            .__timeMsg__(AppBase.BOLD+AppBase.ITALICS+AppBase.DARK_BLUE) \
-            .__header__(AppBase.BOLD+AppBase.DARK_BLUE) \
-            .__coloredMsg__(AppBase.ITALICS + AppBase.LIGHT_BLUE) \
-            .__tagMsg__(AppBase.LIGHT_AMBER,AppBase.LIGHT_BLUE)
-        self.print("%s" % (self.__formattedMsg__()))
-        return self
-
-    def install_local(self, verbal = True):
-        return self.__install_local__(self.this(), verbal)
-
-    def installedGlobal(self):
-        return os.path.exists(self.globalInstallPath()) 
-
-    def installedLocal(self):
-        which = self.which()
-        if which == '' or which == self.globalInstallPath():    
-            return False    
-        return os.path.exists(self.which()) 
-
-    def install_target_global(self, this):
-        if self.targetApp() != '':
-            result, stdout = self.shell("rm -rf %s/%s" % (self.globalInstallRoot(), self.targetApp()))
-        result, stdout = self.shell("cp %s %s" % ( this, self.globalInstallRoot()))
-        result, stdout = self.shell("chmod +x %s/%s" % (self.globalInstallRoot(), self.targetApp()))
-        if result:
-            self.safeMsg("Installed Globally! \n  Your OS is: %s\n  Please type 'hash -r'%s to refresh bash shell hash!\n  Then, you can type '%s' to run!" 
-                % (self.osVersion(), startSh, self.targetApp()), "SELF INSTALL")
-
-    def install_target_local(self, this):
-        result, stdout = self.shell("mkdir -p %s" % self.localInstallFolder())
-        if self.targetApp() != '':
-            result, stdout = self.shell("rm -rf %s/%s" % (self.localInstallFolder(), self.targetApp()))
-        result, stdout = self.shell("cp %s %s" % ( this, self.localInstallFolder()))
-        result, stdout = self.shell("chmod +x %s/%s" % (self.localInstallFolder(), self.targetApp()))
-        startSh =  ""
-        if self.osVersion() == 'macOS':
-            self.check_and_modify_zshenv()
-            startSh = " and 'source ~/.zshenv'"
-        elif self.osVersion() != 'Alpine' :
-            self.check_and_modify_bashrc()
-            startSh =  " and 'source ~/.bashrc'"
-        if result:
-            self.safeMsg("Installed Locally! \n  Your OS is: %s\n  Please type 'hash -r'%s to refresh bash shell hash!\n  Then, you can type '%s' to run!" 
-                % (self.osVersion(), startSh, self.targetApp()), "SELF INSTALL")
-
-    def is_bashrc_modified(self):
-        # Check if .bashrc file exists and if it contains the modification lines
-        if not os.path.isfile(self.bashrc()):
-            return False
-        
-        with open(self.bashrc(), "r") as file:
-            contents = file.read()
-        
-        return "# modified to add ~/.local/bin to PATH" in contents
-
-    def is_zshenv_modified(self):
-        # Check if .zshenv file exists and if it contains the modification lines
-        if not os.path.isfile(self.zshenv()):
-            return False
-        
-        with open(self.zshenv(), "r") as file:
-            contents = file.read()
-        
-        return "# modified to add ~/.local/bin to PATH" in contents
-    def isGlobal(self):
-        return self.this() == self.globalInstallPath()
-
-    def isLocal(self):
-        which = self.which()
-        if which == '' or self.comparePath(which, self.globalInstallPath()):
-            return False
-        return self.comparePath(self.this(),which)
-
-    def isSudo(self, sudo=None):
-        if sudo is not None:
-            self.__isSudo__=sudo
-            return self
-        elif not hasattr(self, '__isSudo__'):
-            self.__isSudo__=False
-        return self.__isSudo__
-
-    def latest_version(self):
-        useRequest = False
-        try:
-            if not hasattr(self,'__latest_version__'):
-                majorVersion = 0
-                minorVersion = 0
-                lines = []
-                result, stdout = self.shell("curl -fsSL %s" % ( self.downloadUrl()), True)
-                if result:
-                    lines = stdout.splitlines()
-                for line in lines:
-                    if 'setInstallation' in line and self.appName() in line:
-                        for token in line.split(')')[0].split(','):
-                            if 'majorVersion' in token:
-                                majorVersion = int(token.split('=')[1])
-                            if 'minorVersion' in token:
-                                minorVersion = int(token.split('=')[1])
-                self.__latest_version__="%d.%d" % (majorVersion,minorVersion)
-                if majorVersion > self.majorVersion() or (majorVersion == self.majorVersion() and minorVersion> self.minorVersion()):
-                    self.__need_update__=True
-        except:
-            self.criticalMsg("Cannot communicate with server", "CONNECTION FAILED")
-        if not hasattr(self,'__latest_version__'):
-            self.__latest_version__='0.0'
-        return self.__latest_version__
-
-    def lastUpdate(self, lastUpdate=None):
-        if lastUpdate is not None:
-            self.__lastUpdate__=lastUpdate
-            return self
-        elif not hasattr(self,'__lastUpdate__'):
-            self.__lastUpdate__=None
-        return self.__lastUpdate__
-
-    def libcName(self, name=None):
-        if name is not None:
-            self.__libc_name__ = name
-            return self
-        elif not hasattr(self, '__libc_name__'):
-            self.__libc_name__ = ''
-        return self.__libc_name__
-
-    def libcVersion(self, version=None):
-        if version is not None:
-            self.__libc_version__ = version
-            return self
-        elif not hasattr(self, '__libc_version__'):
-            self.__libc_version__ = ''
-        return self.__libc_version__
-
-    def linuxDistro(self):
-        if not hasattr(self, '__distro__'):
-            self.__distro__=''
-            if os.path.isfile("/etc/os-release"):
-                fin = open("/etc/os-release", "rt")
-                self.__distro__ = ''
-                for line in fin:
-                    if line.startswith('PRETTY_NAME='):
-                        self.__distro__ = line.split('"')[1]
-                if 'Alpine' in self.__distro__:
-                    self.shellCmd("/bin/ash")
-        return self.__distro__
-
-    def local(self):
-        return socket.gethostname()
-
-    def localInstallFolder(self):
-        if self.shellCmd() == 'cmd':
-            return 'C:\\Users\\%s\\AppData\\Local\\Microsoft\\WindowsApps' % self.username()
-        else:  
-            return os.path.abspath('%s/.local/bin' % self.home())
-
-    def localInstallPath(self):
-        if self.shellCmd() == 'cmd':
-            return '%s\\%s.bat' % (self.localInstallFolder(), self.appName())
+    def msg_install_app_global(self):
+        if self.isCmd() or self.isGitBash():
+            self.msg_install('Globally', "%s.bat" % self.appName() )
         else:
-            return os.path.abspath('%s/%s' % (self.localInstallFolder(), self.appName()))
+            self.msg_install('Globally', self.appName())
 
-    def majorVersion(self, majorVersion=None):
-        if majorVersion is not None:
-            self.__majorVersion__=majorVersion
-            return self
-        elif not hasattr(self,'__majorVersion__'):
-            self.__majorVersion__=0
-        return self.__majorVersion__
+    def msg_install_app_local(self):
+        if self.isCmd() or self.isGitBash():
+            self.msg_install('Locally', "%s.bat" % self.appName() )
+        else:
+            self.msg_install('Locally', self.appName())
 
-    def minorVersion(self, minorVersion=None):
-        if minorVersion is not None:
-            self.__minorVersion__=minorVersion
-            return self
-        elif not hasattr(self,'__minorVersion__'):
-            self.__minorVersion__=0
-        return self.__minorVersion__
+    def msg_install(self, location, app):
+        startSh =  ""   # for ash, cmd, gitbash
+        if location == 'Locally':
+            if self.osVersion() == 'macOS':
+                startSh = "  Please type 'hash -r' and 'source ~/.zshenv' to refresh zsh shell hash!\n  Then, you can "
+            elif self.shellCmd() != '/bin/ash' and self.isLinuxShell():
+                startSh =  "  Please type 'hash -r' and 'source ~/.bashrc' to refresh bash shell hash!\n  Then, you can "
+            self.safeMsg("Installed %s! \n%s  type '%s' to run!" % (location, startSh, app), "INSTALL")
+        else:
+            self.safeMsg("Installed %s! \n    type '%s' to run!" % (location, app), "INSTALL")
 
-    def mkdir_localInstallFolder(self):
-        os.mkdir(self.localInstallFolder())
+    def msg_install_target_global(self):
+        if self.isCmd() or self.isGitBash():
+            self.msg_install('Globally', "%s.bat" % self.targetApp() )
+        else:
+            self.msg_install('Globally', self.targetApp())
 
-    def need_update(self):
-        if not hasattr(self,'__need_update__'):
-            self.__need_update__=False
-            self.latest_version()
-        return self.__need_update__
+    def msg_install_target_local(self):
+        if self.isCmd() or self.isGitBash():
+            self.msg_install('Locally', "%s.bat" % self.targetApp() )
+        else:
+            self.msg_install('Locally', self.targetApp())
 
-    def now(self):
-        return str(datetime.now())
-
-    def osVersion(self):
-        if hasattr(self,'__distro__') and self.__distro__ != "":
-            return self.__distro__
-        if os.path.exists("/etc/os-release"):
-            self.shellCmd('/bin/bash')
-            self.linuxDistro()
-        elif os.name == 'nt':
-            self.__distro__='windows'
-            self.shellCmd('cmd')
-        else :
-            self.shellCmd('/bin/sh')
-            result, stdout = self.shell("sw_vers -productName")
-            self.__distro__  = ''
-            if result:
-                self.__distro__ = stdout.strip()
-            if 'macOS' in self.__distro__:
-                self.shellCmd('/bin/zsh')
-        return self.__distro__
-
-    def pid(self):
-        return os.getpid()
-
-    def print(self, msg):
-        print("%s" % msg)
-        return self
-
-    def pythonMajor(self, major=None):
-        if major is not None:
-            self.__python_major__ = major
-            return self
-        elif not hasattr(self, '__python_major__'):
-            self.__python_major__ = 0
-        return self.__python_major__
-
-    def pythonMinor(self, minor=None):
-        if minor is not None:
-            self.__python_minor__ = minor
-            return self
-        elif not hasattr(self, '__python_minor__'):
-            self.__python_minor__ = 0
-        return self.__python_minor__
-
-    def pythonName(self, name=None):
-        if name is not None:
-            self.__python_name__ = name
-            return self
-        elif not hasattr(self, '__python_name__'):
-            self.__python_name__ = 0
-        return self.__python_name__
-
-    def pythonVersion(self, version=None):
-        if version is not None:
-            self.__python_version__ = version.strip()
-            return self
-        elif  hasattr(self, '__python_version__'):
-            return self.__python_version__ 
-        self.__python_version__ = sys.version
-        if len(self.__python_version__.split('\n'))>1:
-            self.__python_version__ =  self.__python_version__.split('\n')[0].strip()
-        if len( self.__python_version__.split('['))>1:
-            self.__python_version__ =  self.__python_version__.split('[')[0].strip()
-        if len( self.__python_version__.split('('))>1:
-            self.__python_version__ =  self.__python_version__.split('(')[0].strip()
-        return self.__python_version__
-
-    def removeFile(self, filePath):
-        if os.path.exists(filePath):
-            if self.shellCmd() == 'cmd':
-                self.shell("del %s >null 2>&1" % filePath )
-            else:          
-                os.remove(filePath)
-
-    def removeFilePattern(self, dirPath, pattern):
-        if os.path.exists(dirPath) and os.path.isdir(dirPath):
-            for file in os.listdir(dirPath):
-                if file.endswith(pattern):
-                    os.remove("%s/%s" % (dirPath,file))
-
-    def removeFolder(self, dirPath):
-        if os.path.exists(dirPath) and os.path.isdir(dirPath):
-            shutil.rmtree(dirPath)
-
-    def safeMsg(self,msg,tag=''):
-        self.__tag__(tag).__message__(msg).__timeMsg__(AppBase.BOLD + AppBase.ITALICS + \
-            AppBase.DARK_TURQUOISE) \
-            .__header__(AppBase.BOLD + AppBase.DARK_TURQUOISE) \
-            .__coloredMsg__(AppBase.ITALICS + AppBase.LIGHT_TURQUOISE) \
-            .__tagMsg__(AppBase.LIGHT_GREEN,AppBase.LIGHT_TURQUOISE)
-        self.print("%s" % (self.__formattedMsg__()))
-        return self
-
-    def selfInstall(self, verbal = True):
-        if self.isGlobal():
-            latest = self.latest_version()
-            if self.need_update():
-                self.infoMsg("You are using an old (%s.%s) Global Installation's copy already!" % (self.majorVersion(),self.minorVersion()) , "SELF INSTALL") 
-                if 'yes' == self.__ask_yesno__('Do you want to update the latest (%s) from internet? (yes/no) ' % latest):
-                    return self.download_and_install(verbal)
-            else:
-                self.infoMsg("You are using latest (%s) Global Installation's copy already!" % latest, "SELF INSTALL")
-                return False
+    def msg_latest(self):
+        if self.isLocal():
+            self.msg_latest_global()
         elif self.isLocal():
-            latest = self.latest_version()
-            if self.need_update():
-                self.infoMsg("You are using an old (%s.%s) Local Installation's copy already!" % (self.majorVersion(),self.minorVersion()), "SELF INSTALL") 
-                if 'yes' == self.__ask_yesno__('Do you want to update the latest (%s) from internet? (yes/no) ' % latest):  
-                    return self.download_and_install(verbal)
-            else:
-                self.infoMsg("You are using latest (%s) Global Installation's copy already!" % latest, "SELF INSTALL")
-                return False
-        elif self.installedGlobal():
-            self.infoMsg("Global Installation installed already!", "SELF INSTALL")
-            if 'yes' == self.__ask_yesno__('Do you want to overwrite the global installation? (yes/no) '):  
-                return self.__self_install__(self.this(), verbal)
-        elif self.installedLocal():
-            self.infoMsg("Local Installation installed already!", "SELF INSTALL")
-            if 'yes' == self.__ask_yesno__('Do you want to overwrite the local installation? (yes/no) '):  
-                return self.install_local(verbal)
-        elif self.username() != 'root':
-            if 'yes' == self.__ask_yesno__('Do you want to install locally? (yes/no) '):
-                return self.install_local(verbal)
+            self.msg_latest_local()
         else:
-            return self.__self_install_globally__(verbal)
+            self.infoMsg("You are using latest (%s.%s) already!" % (self.majorVersion(),self.minorVersion()), "CHECK VERSION")
 
-    def selfLocation(self):
-        if self.this() != '':
-            return self.this()
-        try:
-            shell = get_ipython().__class__.__name__
-            if shell == 'ZMQInteractiveShell':
-                return "Jupyter"
-            elif shell == 'TerminalInteractiveShell':
-                return "IPython"
-            else:
-                return "Unknown location"
-        except NameError:
-            return "Unknown location" 
-        
-    def selfUninstallGlobal(self, verbal = True):
-        if self.installedGlobal():
-            result = False
-            if self.username() != 'root':
-                if self.sudo_test():
-                    self.sudoRemoveFile(self.globalInstallPath())
-                    result = True
-                else:
-                    self.criticalMsg("You should be root or sudo to uninstall globally.", "GLOBAL UNINSTALL")
-            else:
-                self.removeFile(self.globalInstallPath())
-                result = True
-            if result and verbal:
-                self.infoMsg("You have uninstalled successfully.", "LOCAL UNINSTALL")
-            return result
-        else:
-            self.infoMsg("You don't have any global installation.", "GLOBAL UNINSTALL")
-        return False
+    def msg_latest_global(self):
+        self.infoMsg("You are using latest (%s.%s) Global Installation's copy already!" % (self.majorVersion(),self.minorVersion()), "CHECK VERSION")
 
-    def selfUninstallLocal(self, verbal = True):
-        if self.installedLocal():
-            self.removeFile(self.localInstallPath())
-            if verbal:
-                self.infoMsg("You have uninstalled successfully.", "LOCAL UNINSTALL")
-            return True
-        else:
-            self.infoMsg("You don't have any local installation.", "LOCAL UNINSTALL")
-            return False
+    def msg_latest_local(self):
+        self.infoMsg("You are using latest (%s.%s) Local Installation's copy already!" % (self.majorVersion(),self.minorVersion()), "CHECK VERSION")
 
-    def setInstallation(self,appName='',author='',lastUpdate='',homepage='',downloadUrl="",majorVersion=0,minorVersion=0):
-        signal.signal(signal.SIGINT, self.signal_handler)
-        self.checkSystem()
-        self.author( author )
-        self.appName( appName )
-        self.downloadUrl( downloadUrl )
-        self.homepage( homepage )
-        self.lastUpdate( lastUpdate )
-        self.majorVersion( majorVersion )
-        self.minorVersion( minorVersion )
+    def msg_latest_available(self):
+        self.infoMsg("Latest Version = %s\n  Update is available" % self.latest_version(), "CHECK UPDATE")
 
-    def shell(self, command, ignoreErr=False):
-        stderr = ''
-        stdout = ''
-        if self.shellCmd() == '/bin/bash' or self.shellCmd() == '/bin/zsh' or self.shellCmd() == '/bin/sh'  or self.shellCmd() == '/bin/ash':
-            stdout,stderr = Popen([self.shellCmd(),'-c',command],stdin=PIPE,stdout=PIPE,\
-                stderr=PIPE,universal_newlines=True).communicate('\n')
-        elif self.shellCmd() == 'cmd':
-            stdout,stderr = Popen([self.shellCmd(),'/c',command],stdin=PIPE,stdout=PIPE,\
-                stderr=PIPE,universal_newlines=True).communicate('\n')
-        else:
-            # Assume /bin/sh as default shell
-            stdout,stderr = Popen(['/bin/sh','-c',command],stdin=PIPE,stdout=PIPE,\
-                stderr=PIPE,universal_newlines=True).communicate('\n')
-        if stderr != "" and not ignoreErr:
-            self.criticalMsg("Error in %s: %s" % (command, stderr), "ERROR")
-            return False, stderr
-        else:
-            return True, stdout
+    def msg_local_already(self):
+        self.infoMsg("Local Installation installed already!", "SELF INSTALL")
 
-    def shellCmd(self, cmd=None):
-        if cmd is not None:
-            self.__shellCmd__=cmd
-            return self
-        elif not hasattr(self,'__shellCmd__'):
-            self.__shellCmd__=''
-            self.osVersion()
-        return self.__shellCmd__
+    def msg_no_global(self):
+        self.infoMsg("You don't have any local installation.", "GLOBAL UNINSTALL")
 
-    def signal_handler(self, sig, frame):
-        print('\nYou pressed Ctrl+C!')
-        sys.exit(0)
+    def msg_no_local(self):
+        self.infoMsg("You don't have any local installation.", "LOCAL UNINSTALL")
 
-    def sudo_test(self,msg='.'):
-        distro = self.osVersion()
-        if distro == 'windows':
-            self.isSudo(False)
-            return False
-        if self.isSudo():
-            return True
-        if distro.startswith('Alpine'):
-            stdout,stderr = Popen([ self.shellCmd(), '-c' , "which sudo" ],\
-                stdin=PIPE,stdout=PIPE,stderr=PIPE,universal_newlines=True)\
-                .communicate( '\n' )
-            if stdout=='':
-                return False
-        stdout,stderr = Popen([ self.shellCmd(), '-c' , "sudo echo %s" % msg ],\
-            stdin=PIPE,stdout=PIPE,stderr=PIPE,universal_newlines=True)\
-            .communicate( '\n' )
-        trial=0
-        while stdout.strip() != msg.strip() and trial < 3:
-            sudoPassword=getpass.getpass( 'Please input "sudo" password for %s: ' % self.username() )
-            stdout, stderr = Popen([ self.shellCmd() , '-c',"sudo echo %s" % msg ] \
-                ,stdin=PIPE,stdout=PIPE,stderr=PIPE,\
-                universal_newlines=True ).communicate( "%s\n" % sudoPassword )
-            trial=trial + 1
-        if trial < 3:
-            self.isSudo( True )
-        return self.isSudo()
+    def msg_no_server(self):
+        self.criticalMsg("Cannot communicate with server", "CONNECTION FAILED")
 
-    def sudoRemoveFile(self, filePath):
-        self.shell( 'sudo rm -rf %s' % filePath )
+    def msg_no_installation(self):
+        self.infoMsg("You don't have any global or local installation.", "UNINSTALL")
 
-    def tag(self, tag=None):
-        if tag is not None:
-            self.__TAG__=tag
-            return self
-        elif not hasattr( self, '__TAG__' ):
-            self.__TAG__=''
-        return self.__TAG__
+    def msg_root_continue(self):
+        self.criticalMsg("You must be root to continue installation!", "SELF INSTALL")
 
-    def targetApp(self, app=None):
-        if app is not None:
-            self.__target_app__=app
-            return self
-        elif not hasattr( self, '__target_app__' ):
-            self.__target_app__=''
-        return self.__target_app__
+    def msg_old_global(self):
+        self.infoMsg("You are using an old (%s.%s) Global Installation's copy already!" % (self.majorVersion(),self.minorVersion()) , "SELF INSTALL")
 
-    def targetDownloadUrl(self):
-        return "%s%s/%d.%d/%s.tar.gz" % (self.downloadUrl(), self.binaryVersion(), self.majorVersion(),self.minorVersion(), self.targetApp())
+    def msg_old_local(self):
+        self.infoMsg("You are using an old (%s.%s) Local Installation's copy already!" % (self.majorVersion(),self.minorVersion()), "SELF INSTALL")
 
-    def tempAttachment(self):
-        if self.shellCmd() == 'cmd':
-            fname="%s\\Downloads\\%s-%s.zip" % (self.tempFolder(),self.targetApp(),self.timestamp())
-        else:
-            fname="%s/%s-%s.tar.gz" % (self.tempFolder(), self.targetApp(),self.timestamp())
-        return fname
+    def msg_sudo_failed(self):
+        self.criticalMsg("You should be root or sudo to install globally.", "SUDO FAILED")
 
-    def tempAttachDecomp(self):
-        if self.shellCmd() == 'cmd':
-            fname="%s\\Downloads\\%s" % (self.tempFolder(),self.targetApp())
-        else:
-            fname="%s/%s" % (self.tempFolder(), self.targetApp())
-        return fname
+    def msg_system_check(self):
+        if not hasattr(self,'__system_msg_shown__'):
+            self.safeMsg("Now checking your operation system!", "START")
+            self.prn("    Python: %s" % self.pythonVersion())
+            self.prn("    C Library: %s" % self.libcVersion())
+            self.prn("    Operation System: %s" % self.osVersion())
+            self.prn("    Current User: %s" % self.username())
+            self.prn("    Shell: %s" % self.shellCmd())
+            self.prn("    Python Executable: %s" % self.executable())
+            self.prn("    Binary Version: %s" % self.binaryVersion() )
+            self.prn("")
+            self.__system_msg_shown__ = True
 
-    def tempFile(self):
-        if self.shellCmd() == 'cmd':
-            fname="%s\\Downloads\\%s-%s.bat" % (self.tempFolder(), self.appName(),self.timestamp())
-        else:
-            fname="%s/%s-%s" % (self.tempFolder(), self.appName(),self.timestamp())
-        return fname
+    def msg_timeout(self, file):
+        self.criticalMsg("Time out in downloading %s" % (file), "ERROR")
 
-    def tempFolder(self):
-        if self.shellCmd() == 'cmd':
-            folder="C:\\Users\\%s\\Downloads" % self.username()
-        elif self.username() == 'root':
-            folder="/tmp" 
-        elif self.osVersion() == 'macOS':
-            folder = '/Users/%s/Library/Caches' % self.username()
-        else:
-            folder="/home/%s/.local/temp" % self.username()
-            self.mkdir(folder)
-        return folder
+    def msg_unintall_global(self):
+        self.infoMsg("You have uninstalled successfully.", "GLOBAL UNINSTALL")
 
-    def this(self, this = None):
-        if this is None :
-            if hasattr(self, '__this__'):
-                return self.__this__
-            if __file__ is None or __file__ == '<stdin>':
-                self.appPath('')
-                return ''
-            else:
-                appPath = os.path.abspath(__file__)
-                if not appPath.startswith(self.globalInstallRoot()):
-                    if self.comparePath(appPath, '%s/%s' % (os.getcwd(),appPath.split("/")[-1])):
-                        self.appPath("./%s" % appPath.split("/")[-1])
-                    elif self.comparePath(appPath, self.which()):
-                        self.appPath(appPath.split("/")[-1])
-                    else:
-                        self.appPath(appPath)
-                else:
-                    self.appPath(appPath.split("/")[-1])  
-                return appPath
-        else:
-            self.__this__ = this
-            return self
+    def msg_uninstall_global_failed(self):
+        self.criticalMsg("Failed to uninstall globally", "UNINSTALL FAILED")
 
-    @staticmethod
-    def thisFile():
-        return AppBase.__here__
+    def msg_uninstall_local(self):
+        self.infoMsg("You have uninstalled successfully.", "LOCAL UNINSTALL")
 
-    def timestamp(self):
-        return "%s" % (int(time.time()))
+    def msg_uninstall_local_failed(self):
+        self.criticalMsg("Failed to uninstall locally", "UNINSTALL FAILED")
 
-    def where_cmd(self, cmd):
-        stdout = ''
-        if self.shellCmd() == '/bin/bash' or self.shellCmd() == '/bin/zsh' or self.shellCmd() == '/bin/sh' or self.shellCmd() == '/bin/ash':
-            result, stdout = self.shell("which %s" % cmd, ignoreErr=True)
-        if self.shellCmd() == 'cmd':
-            result, stdout = self.shell("where %s" % cmd, ignoreErr=True)
-        return stdout.strip()
-
-    def which(self):
-        if os.path.exists('/usr/bin/which'):
-            return self.which_cmd( self.appName())
-        elif os.path.exists('C:\\Windows\\System32\\where.exe'):
-            return self.which_cmd( self.appName())
-        elif os.path.exists(self.localInstallPath()):
-            return self.localInstallPath()
-        elif os.path.exists(self.globalInstallPath()):
-            return self.globalInstallPath()
-        else:
-            return ""
-
-    def which_cmd(self, cmd):
-        stdout = ''
-        if self.shellCmd() == '/bin/bash' or self.shellCmd() == '/bin/zsh' or self.shellCmd() == '/bin/sh' or self.shellCmd() == '/bin/ash':
-            result, stdout = self.shell("which %s" % cmd, ignoreErr=True)
-        elif self.shellCmd() == 'cmd':
-            result, stdout = self.shell("where %s" % cmd, ignoreErr=True)
-        return stdout.strip()
-
-    def useColor(self, color=None):
-        if color is not None:
-            self.__useColor__=color
-            return self
-        elif not hasattr(self, '__useColor__'):
-            self.__useColor__=True
-        return self.__useColor__
-
-    def userID(self):
-        return os.getuid()
-
-    def username(self):
-        if pwd is None:
-            return os.getlogin()
-        return pwd.getpwuid(self.userID())[0]
-
-    def version(self):
-        return "%s.%s" % (self.majorVersion(),self.minorVersion())
-
-    def zshenv(self):
-        return os.path.join(self.home(), ".zshenv")
-
+    def msg_unintall_need_root(self):
+        self.criticalMsg("You should be root or sudo to uninstall globally.", "GLOBAL UNINSTALL")
 
 class OnlineInstaller(AppBase):
 
     def start(self):
         self.allowInstallLocal(True)
-        self.__parseArgs__()
-
-    def __parseArgs__(self, allowSelfInstall = True, allowDisplayInfo = True):
-        if self.isLocal() or self.isGlobal():
-            appPath = self.appName()
-        elif self.appPath() != '' :
-            appPath = './' + self.appName()
-        else:
-            appPath = ''
-        usage = "%s [check-update|install|uninstall]" % appPath
-        if self.appPath() != '' :
-            if len(sys.argv) > 1:
-                self.cmd(sys.argv[1])
-                if self.cmd() == "install":
-                    if self.selfInstall(False):
-                        self.downloadTarget()
-                elif self.cmd() == "uninstall":
-                    if self.installedGlobal():
-                        if self.selfUninstallGlobal(False):
-                            self.removeFile("%s/%s" % (self.globalInstallRoot(), self.targetApp()))
-                            self.infoMsg("You have uninstalled globally successfully. Please run `hash -r` manually!", "GLOBAL UNINSTALL")
-                        else:
-                            self.criticalMsg("Failed to uninstall globally", "UNINSTALL FAILED")
-                    elif self.installedLocal():
-                        if self.selfUninstallLocal(False):
-                            self.removeFile("%s/%s" % (self.localInstallFolder(), self.targetApp()))
-                            self.infoMsg("You have uninstalled locally successfully. Please run `hash -r` manually!", "LOCAL UNINSTALL")
-                        else:
-                            self.criticalMsg("Failed to uninstall locally", "UNINSTALL FAILED")
-                    else:
-                        self.infoMsg("You don't have any global or local installation.", "UNINSTALL")
-                elif self.cmd() == "check-update":
-                    latest = self.latest_version()
-                    if self.need_update():
-                        self.infoMsg("Latest Version = %s\n  Update is available" % latest, "CHECK UPDATE")
-                    elif latest != '0.0':
-                        self.infoMsg("You are using most updated version: %s" % latest, "CHECK UPDATE")
-                elif allowDisplayInfo:
-                    self.info(usage)
-            elif allowDisplayInfo:
-                self.info(usage)
-        elif allowSelfInstall:
-            if '<stdin>' == self.thisFile():
-                if self.download_and_install(False):
-                    self.downloadTarget()
-            else:
-                if self.selfInstall(False):
-                    self.downloadTarget()
+        usage = "%s [check-update|install|uninstall]" % self.appExec()
+        if not self.parseArgs(usage):
+            self.msg_info(usage)
 
 if __name__ == "__main__":
     app = OnlineInstaller()
     app.targetApp('spanish-num')
-    app.setInstallation(appName='spanish-num-installer',author='Cloudgen Wong',homepage="https://github.com/cloudgen2/spanish-num",downloadUrl="https://dl.leolio.page/spanish-num/",lastUpdate='2023-10-14',majorVersion=0,minorVersion=4)
+    app.setInstallation(appName='spanish-num-installer',author='Cloudgen Wong',homepage="https://github.com/cloudgen2/spanish-num",downloadUrl="https://dl.leolio.page/spanish-num",lastUpdate='2023-10-14',majorVersion=0,minorVersion=4)
     app.start() 
 
