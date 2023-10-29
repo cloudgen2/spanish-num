@@ -827,7 +827,11 @@ class AppBase(object):
 
     def download_and_install(self, verbal = True):
         if self.targetApp() != '':
-            result = self.download_and_install_target()
+            if self.username() == 'root' or  not self.isGlobal():
+                result = self.download_and_install_target()
+            else:
+                self.msg_global_already()
+                return False                
         else:
             result=True
         if result:
@@ -836,8 +840,11 @@ class AppBase(object):
             if self.pathexists(fname):
                 if self.username() == 'root':
                     result=self.__self_install__(this=fname, verbal=False)
-                else:
+                elif not self.isGlobal():
                     result=self.__install_local__(this=fname, verbal=False)
+                else:
+                    self.msg_global_already()
+                    return False
                 self.cmd_history_print()
                 if result and verbal:
                     if self.targetApp() != '':
@@ -1053,7 +1060,14 @@ class AppBase(object):
 
     def isGlobal(self):
         if not hasattr(self,'__is_global__'):
-            self.__is_global__ = self.thisFile() == self.globalInstallPath(0) or self.thisFile() == self.globalInstallPath(1)
+            this=self.thisFile() 
+            if this=='' or this=='<stdin>':
+                if self.pathexists(self.globalInstallPath(0)) or self.pathexists(self.globalInstallPath(1)):
+                    return True 
+                else:
+                    return False
+            else:
+                self.__is_global__ = self.thisFile() == self.globalInstallPath(0) or self.thisFile() == self.globalInstallPath(1)
         return self.__is_global__
 
     def isLinuxShell(self):
@@ -1468,7 +1482,9 @@ class AppBase(object):
                         self.sudoRemoveFile(self.globalInstallPath(1))
                         result = True
                 else:
-                    self.msg_unintall_need_root()
+                    if verbal:
+                        self.msg_unintall_need_root()
+                    return False
             else:
                 if self.targetApp() != '':
                     file1 = "%s/%s" % (self.globalFolder(0), self.targetApp())
@@ -1511,7 +1527,10 @@ class AppBase(object):
             self.selfUninstallLocal(verbal)
             once = True
         if self.installedGlobal():
-            self.selfUninstallGlobal(verbal)
+            if once:
+                self.selfUninstallGlobal(verbal=False)
+            else:
+                self.selfUninstallGlobal(verbal)
             once = True
         if not once:
             self.msg_no_installation()    
@@ -1910,6 +1929,9 @@ class AppBase(object):
 
     def msg_global_already(self, title="SELF INSTALL"):
         self.infoMsg("Global Installation installed already!", title)
+
+    def msg_global_failed(self, title="SELF INSTALL"):
+        self.criticalMsg("Global uninstall failed!", title)
 
     def msg_info(self, usage=""):
         if self.isCmd():
