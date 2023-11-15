@@ -30,9 +30,9 @@ if [ ! -z $WHICH ]; then
     _PY_=$($WHICH python3)
     if [ -z $_PY_ ]; then _PY_=$($WHICH python2); if [ -z $_PY_ ]; then _PY_=$($WHICH pypy3); if [ -z $_PY_ ]; then _PY_=$($WHICH pypy); if [ -z $_PY_ ]; then _PY_=$($WHICH python); if [ -z $_PY_ ]; then echo 'No Python Found'; fi; fi; fi; fi; fi; 
     if [ ! -z "$_PY_" ]; then
-        WINPTY=$($WHICH winpty.exe)
+        WINPTY=$($WHICH winpty.exe 2>/dev/null)
         if [ ! -z "$WINPTY" ]; then
-            PY_EXE=$($WHICH python.exe)
+            PY_EXE=$($WHICH python.exe 2>/dev/null)
             if [ ! -z "$PY_EXE" ]; then
                 exec "$WINPTY" "$PY_EXE" "$0" "$@"
                 exit 0
@@ -115,7 +115,7 @@ class AppBase(object):
     __here__ = __file__
 
     def __alpine_ask_install_sudo__(self):
-        if 'yes' == self.__ask_yesno__('Do you want to install sudo? (yes/no) '):
+        if self.ask_install_sudo():
             cmd="apk add sudo"
             self.cmd_history(cmd)
             result, stdout = self.shell(cmd, True)
@@ -126,9 +126,16 @@ class AppBase(object):
     def __ask_yesno__(self, ask):
         if not hasattr(self, '__regex_yesno__'):
             self.__regex_yesno__ = re.compile(r"yes|no")
-        ask_yesno = raw_input(ask).strip().lower()
-        while ask_yesno == '' or self.__regex_yesno__.sub("",ask_yesno) != '':
+        ask_yesno = ''
+        try:
             ask_yesno = raw_input(ask).strip().lower()
+        except:
+            ask_yesno = ""
+        while ask_yesno == '' or self.__regex_yesno__.sub("",ask_yesno) != '':
+            try:
+                ask_yesno = raw_input(ask).strip().lower()
+            except:
+                ask_yesno = ""
         return ask_yesno
 
     def __coloredMsg__(self,color=None):
@@ -203,51 +210,12 @@ class AppBase(object):
             this = self.thisFile()
         if self.isCmd() or self.isGitBash():
             file = 'C:\\Users\\%s\\AppData\\Local\\Microsoft\\WindowsApps\\%s.bat' % (self.username(),self.appName())
-            self.cmd_history("# ** Try to remove previous installed version **")
-            self.removeFile(file)
-            if self.pathexists(this):
-                self.cmd_history("# ** Open downloaded python script as source **")
-                file1 = self.open(this, 'r')
-                self.cmd_history("# ** Open the target location for writing modified python script **")
-                file2 = self.open(file,'w')
-                for line in file1:
-                    if line.startswith('##! '):
-                        file2.write(line[4:])
-                    elif not (line.startswith('from __future__') or line.startswith('#!') or line.startswith('# -*-')):
-                        file2.write(line)
-                file1.close()
-                file2.close()
-                self.cmd_history("# ** Try to remove downloaded file **")
-                self.removeFile(this)
-                result = True
-            else:
-                result = False
+            result = self.translateScript(source=this, target=file, useSudo=False)
         else:
             folder=self.localInstallFolder()
             self.mkdir(folder)
             file=self.localInstallPath()
-            self.cmd_history("# ** Try to remove previous installed version **")
-            self.removeFile(file)
-            if self.pathexists(this):
-                self.cmd_history("# ** Open downloaded python script as source **")
-                file1 = self.open(this, 'r')
-                self.cmd_history("# ** Open the target location for writing modified python script **")
-                file2 = self.open(os.path.realpath(file),'w')
-                for line in file1:
-                    if line.startswith('#!/bin/sh'):
-                        file2.write('#!%s\n' % sys.executable)
-                    else:
-                        file2.write(line)
-                file1.close()
-                file2.close()
-                self.cmd_history("# ** Try to remove downloaded file **")
-                self.removeFile(this)
-                self.cmd_history("# ** Change target to executable **")
-                result=self.chmod_x(file)
-                result=True
-            else:
-                self.msg_download_not_found(this)
-                result = False
+            result = self.translateScript(source=this, target=file, useSudo=False)
         self.check_env()
         if verbal:
             if self.targetApp() == '':
@@ -264,19 +232,21 @@ class AppBase(object):
             self.__m__=""
         return self.__m__
 
-    def __self_install__(self, this=None, verbal = True):
+    def __self_install__(self, this=None, verbal = True, sudo=False):
         if this is None:
             this = self.thisFile()
         result = False
         try_global = True
         if self.username() != 'root':
             if self.allowInstallLocal():
-                if self.__ask_yesno__('You are not using root account. Do you want to continue? (yes/no) ') == 'yes':
-                    if self.__ask_yesno__('Install globally (yes) or locally(no)? (yes/no) ') == 'no':
+                if self.fromPipe():
+                    return False
+                if self.ask_not_root():
+                    if self.ask_choose():
                         try_global = False
                         result = self.__install_local__()
-            elif self.__ask_yesno__('You are not using root account. Do you want to continue? (yes/no) ') == 'no':
-                try_global = False
+            elif sudo:
+                try_global = True
                 result = False
                 if try_global:
                     if self.osVersion() == 'Alpine':
@@ -284,36 +254,15 @@ class AppBase(object):
                         self.msg_sudo_failed()
                         result = False
                     elif self.sudo_test():
-                        cmd="sudo cp %s %s" % (this, self.globalInstallPath(1))
-                        self.cmd_history(cmd)
-                        result, stdout = self.shell(cmd)
-                        cmd="sudo chmod +x %s" % self.globalInstallPath(1)
-                        self.cmd_history(cmd)
-                        result, stdout = self.shell(cmd)
+                        self.msg_sudo()
+                        self.removeGlobalInstaller()
+                        result = self.translateScript(source=this, target=self.globalInstallPath(1),useSudo=True)
                     else:
                         self.msg_sudo_failed()
                         result = False
         else:
-            file = self.globalInstallPath(1)
-            if self.pathexists(this):
-                self.cmd_history("# ** Open downloaded python script as source **")
-                file1 = self.open(this, 'r')
-                self.cmd_history("# ** Open the target location for writing modified python script **")
-                file2 = self.open(os.path.realpath(file),'w')
-                for line in file1:
-                    if line.startswith('#!/bin/sh'):
-                        file2.write('#!%s\n' % sys.executable)
-                    else:
-                        file2.write(line)
-                file1.close()
-                file2.close()
-                self.cmd_history("# ** Try to remove downloaded file **")
-                self.removeFile(this)
-                self.cmd_history("# ** Change target to executable **")     
-                result= self.chmod_x(file)
-            else:
-                self.msg_download_not_found(file)
-                result = False
+            self.removeGlobalInstaller()
+            result = self.translateScript(source=this, target=self.globalInstallPath(1))
         if result:
             if try_global and verbal:
                 self.msg_install_app_global()
@@ -321,8 +270,12 @@ class AppBase(object):
         return result
 
     def __self_install_globally__(self, verbal = True):
-        if self.sudo_test():
-            return self.__self_install__(this=self.thisFile(), verbal=verbal)
+        if self.username() == 'root':
+            self.__self_install__(this=self.thisFile(), verbal=verbal)
+        elif self.ask_not_root():
+            if self.sudo_test():
+                self.msg_sudo()
+                return self.__self_install__(this=self.thisFile(), verbal=verbal, sudo=True)
         elif self.username() != 'root':
             self.msg_root_continue()
             return False
@@ -444,18 +397,42 @@ class AppBase(object):
 
     def allowInstallLocal(self, installLocal=None):
         if installLocal is not None:
-            self.__allowInstallLocal__=installLocal
+            self.__allow_install_local__=installLocal
             return self
-        elif not hasattr(self,'__allowInstallLocal__'):
-            self.__allowInstallLocal__=False
-        return self.__allowInstallLocal__
+        elif not hasattr(self,'__allow_install_local__'):
+            self.__allow_install_local__=True
+        return self.__allow_install_local__
+
+    def allowDisplayInfo(self, state=None):
+        if state is not None:
+            self.__allow_display_info__=state
+            return self
+        elif not hasattr(self, '__allow_display_info__'):
+            self.__allow_display_info__=True
+        return  self.__allow_display_info__
+
+    def allowLinuxOnly(self, state=None):
+        if state is not None:
+            self.__allow_linux_only__=state
+            return self
+        elif not hasattr(self,'__allow_linux_only__'):
+            self.__allow_linux_only__=False
+        return self.__allow_linux_only__
+
+    def allowSelfInstall(self, state=None):
+        if state is not None:
+            self.__allow_self_install__=state
+            return self
+        elif not hasattr(self,'__allow_linux_only__'):
+            self.__allow_self_install__=True
+        return self.__allow_self_install__
 
     def appExec(self):
         if not hasattr(self, '__app_path__'):
             self.appPath()
         if not hasattr(self, '__app_exec__'):
             self.__app_exec__ = ''
-            if self.isLocal() or self.isGlobal():
+            if self.is_local() or self.isGlobal():
                 if self.isCmd() or self.isGitBash():
                     self.__app_exec__ = self.appName() + '.bat'
                 else:
@@ -567,13 +544,13 @@ class AppBase(object):
 
     def check_env(self):
         if self.shellCmd() == '/bin/zsh':
-            self.cmd_history("# ** Try to check and modify ~/.zshenv **")
+            self.history_check_zsh()
             self.check_and_modify_zshenv()
         elif self.shellCmd() == '/bin/bash':
-            self.cmd_history("# ** Try to check and modify ~/.bashrc **")
+            self.history_check_bash()
             self.check_and_modify_bashrc()
         elif self.shellCmd() == '/bin/ash':
-            self.cmd_history("# ** Try to check and modify ~/.profile **")
+            self.history_check_ash()
             self.check_and_modify_bashprofile()
 
     def check_and_modify_bashprofile(self):
@@ -588,7 +565,7 @@ class AppBase(object):
         if not self.is_zshenv_modified():
             self.add_zshenv_modification()
 
-    def checkSystem(self):
+    def check_system(self):
         if self.pythonVersion().split(".")[0] =="3":
             self.pythonName( "python3" )
             major = 3
@@ -638,26 +615,52 @@ class AppBase(object):
             else:
                 self.binaryVersion('%s-%s' % (self.arch(), self.libcName()))
 
-    def checkUpdate(self):
+    def check_update(self):
         if self.need_update():
             self.msg_latest_available()
         elif self.latest_version() != '0.0':
             self.msg_latest()
 
-    def chmod(self, filePath="", switch="", use_history=True):
+    def chmod(self, filePath="", switch="", use_history=True, useSudo=False):
         if self.isCmd() or self.isGitBash():
             filePath=self.path_to_dos(filePath)
         if self.pathexists(filePath):
-            chmod = self.which_cmd('chmod')
-            cmd = '%s %s %s' % (chmod,switch,filePath)                
+            chmod_cmd = self.which_cmd('chmod')
+            cmd=""
+            if useSudo:
+                if self.sudo_cmd()!="":
+                    cmd = '%s %s %s %s' % (self.sudo_cmd(), chmod_cmd,switch,filePath)
+            else:                
+                cmd = '%s %s %s' % (chmod_cmd,switch,filePath)
+            if cmd=="":
+                return False                
+            if use_history:
+                self.cmd_history(cmd)
+            result, stdout = self.shell(cmd)
+            return result
+        return False
+
+    def chown(self, filePath="", owner="", use_history=True, useSudo=False):
+        if self.isCmd() or self.isGitBash():
+            filePath=self.path_to_dos(filePath)
+        if self.pathexists(filePath):
+            chown = self.which_cmd('chown')
+            cmd=""
+            if useSudo:
+                if self.sudo_cmd()!="":
+                    cmd = '%s %s -R %s %s' % (self.sudo_cmd(), chown,owner,filePath)
+            else:                
+                cmd = '%s -R %s %s' % (chown,owner,filePath)    
+            if cmd=="":
+                return False            
             if use_history:
                 self.cmd_history(cmd)
             result, stdout = self.shell(cmd)
             return result
         return False
     
-    def chmod_x(self, filePath="", use_history=True):
-        return self.chmod(filePath=filePath, switch="+x", use_history=use_history)
+    def chmod_x(self, filePath="", use_history=True, useSudo=False):
+        return self.chmod(filePath=filePath, switch="+x", use_history=use_history, useSudo=useSudo)
 
     def cmd(self, cmd=None):
         if cmd is not None:
@@ -667,7 +670,7 @@ class AppBase(object):
             self.__cmd__=False
         return self.__cmd__
 
-    def cmdList(self, x=None, rstrip=False):
+    def cmd_list(self, x=None, rstrip=False):
         if not hasattr(self,'__cmdList__'):
             self.__cmdList__=[]
         if x is not None:
@@ -685,21 +688,69 @@ class AppBase(object):
     def comparePath(self, p1, p2):
         return os.path.abspath(p1)==os.path.abspath(p2)
 
-    def cp(self, filePath1="", filePath2="", use_history=True):
+    def cp(self, filePath1="", filePath2="", use_history=True, useSudo=False):
+        cmd = ""
         if self.isCmd() or self.isGitBash():
             filePath1=self.path_to_dos(filePath1)
             filePath2=self.path_to_dos(filePath2)
             cmd = 'copy %s %s' % (filePath1,filePath2)
-        else:        
+        else:
             cp = self.which_cmd('cp')
-            cmd = '%s %s %s' % (cp,filePath1,filePath2)
-        shutil.copy(filePath1,filePath2)    
+            if useSudo:
+                if self.sudo_cmd!="":
+                    cmd = 'sudo %s %s %s' % (cp,filePath1,filePath2)
+            else:
+                cmd = '%s %s %s' % (cp,filePath1,filePath2)
+        if cmd=="":
+            return False 
+        if useSudo:
+            self.shell(cmd, ignoreErr=True)
+        else:
+            shutil.copy(filePath1,filePath2) 
         if self.pathexists(filePath1):
             if use_history:
                 self.cmd_history(cmd)
             result, stdout = self.shell(cmd)
             return result
         return False
+
+    def create_user(self, username=None, user_id=None, group_id=None, home=None):
+        self.create_group(username, user_id=user_id, group_id=group_id)
+        cmd= "id %s" % username
+        self.history_check_user_exists()
+        self.cmd_history(cmd)
+        result, stdout = self.shell(cmd, ignoreErr=True)
+        if stdout=="":
+            cmd = ""
+            if home is None:                    
+                if self.osVersion().startswith('Alpine'):
+                    if self.is_sudo():
+                        cmd = "sudo adduser -D -G %s %s" % (group_id, username, username)
+                    else:
+                        cmd = "adduser -D -G %s %s" % (group_id, username, username)
+                elif self.osVersion().startswith('Debian') or self.osVersion().startswith('Ubuntu') or self.osVersion().startswith('CentOS'):
+                    if self.is_sudo():
+                        cmd = "sudo useradd -g %d -u %d -m -s /bin/bash %s" % (group_id, user_id, username)
+                    else:
+                        cmd = "useradd -g %d -u %d -m -s /bin/bash %s" % (group_id, user_id, username)
+            else:
+                if self.osVersion().startswith('Alpine'):
+                    if self.is_sudo():
+                        cmd = "sudo adduser -D -G %s -h %s %s" % (username, home, username)
+                    else:
+                        cmd = "adduser -D -G %s -h %s %s" % (username, home, username)
+                elif self.osVersion().startswith('Debian') or self.osVersion().startswith('Ubuntu') or self.osVersion().startswith('CentOS'):
+                    if self.is_sudo():
+                        cmd = "sudo useradd -g %d -u %d -m -d %s -s /bin/bash %s" % (group_id, user_id, home, username)
+                    else:
+                        cmd = "useradd -g %d -u %d -m -d %s -s /bin/bash %s" % (group_id, user_id, home, username)
+            if cmd != "":
+                self.history_add_user(username)
+                self.cmd_history(cmd)
+                self.shell(cmd, ignoreErr=True)
+        else:
+            self.history_user_exists(username)
+            self.msg_user_found(username)
 
     def criticalMsg(self,msg,tag=''):
         self.__tag__(tag).__message__(msg) \
@@ -782,9 +833,9 @@ class AppBase(object):
         return True, stdout
 
     def curl_download(self, url='', file='', ignoreErr=True):
-        self.cmd_history("# ** Using curl to check if url is ok **")
+        self.history_curl_check()
         if self.curl_is_200(url):
-            self.cmd_history("# ** Using curl for downloading file **")
+            self.history_curl_download()
             self.curl_cmd(url=url, file=file, ignoreErr=ignoreErr)
             if file == '':
                 return True
@@ -834,6 +885,7 @@ class AppBase(object):
         return self.__curPath__
 
     def download_to_temp(self, url=None, file=None,verbal = False):
+        # msg_system_check(), this message only shown when downloading files
         self.msg_system_check()
         if url is None:
             url=self.downloadUrl()
@@ -847,7 +899,7 @@ class AppBase(object):
             self.msg_downloaded(file)
         return result
 
-    def download_and_install(self, verbal = True):
+    def download_and_install(self, verbal = False):
         if self.targetApp() != '':
             if self.username() == 'root' or  not self.isGlobal():
                 result = self.download_and_install_target()
@@ -867,7 +919,8 @@ class AppBase(object):
                 else:
                     self.msg_global_already()
                     return False
-                self.cmd_history_print()
+                if verbal:
+                    self.cmd_history_print()
                 if result and verbal:
                     if self.targetApp() != '':
                         if self.username() == 'root':
@@ -880,14 +933,16 @@ class AppBase(object):
                         else:
                             self.msg_install_app_local()
                 return result
+            else:
+                self.msg_download_not_found()
         return False
 
     def chdir(self, path):
         if self.isCmd() or self.isGitBash():
-            self.cmd_history("cd %s" % self.path_to_dos(path))
+            self.history_cd(self.path_to_dos(path))
             os.chdir(self.path_to_dos(path))
         else:
-            self.cmd_history("cd %s" % self.tempFolder())
+            self.history_cd(self.tempFolder())
             os.chdir(path)
 
     def download_and_install_target(self):
@@ -896,14 +951,13 @@ class AppBase(object):
         fname = self.tempTargetGzip()
         self.download_to_temp(url=self.tempAppUrl(), file=fname, verbal=False)
         if self.pathexists(fname):
-            self.cmd_history("# ** Change to temp folder to uncompress **")
+            self.history_cd_decompress()
             self.chdir(self.tempFolder())
-            
             if self.isCmd() or self.isGitBash():
                 self.tar_extract( self.path_to_dos(fname).split('\\')[-1] )
             else:
                 self.tar_extract(fname.split('/')[-1])
-            self.cmd_history("# ** Try to remove downloaded file **")
+            self.history_remove_downloaded()
             self.removeFile(fname)
             if self.isCmd() or self.isGitBash():
                 this = "%s.exe" % self.tempAttachDecomp()
@@ -912,7 +966,7 @@ class AppBase(object):
             if self.pathexists(this):
                 self.this(this)
                 if self.username() == 'root':
-                    self.install_target_global(this)
+                    self.install_target_global(this, useSudo=False)
                 else:
                     self.install_target_local(this)
                 return True
@@ -1007,6 +1061,64 @@ class AppBase(object):
     def install_local(self, verbal = True):
         return self.__install_local__(self.thisFile(), verbal)
 
+    def install_package(self, package=None, path=None):
+        # root_or_sudo() Check user is root or has sudo privilege and assuming linux
+        if not self.root_or_sudo():
+            return False
+        installed = False
+        if path is not None and package is not None:
+            self.history_check_exists(package)
+            if isinstance(path,basestring):
+                if self.pathexists(path, use_history=True):
+                    self.history_package_exists(package)
+                    return True
+            elif isinstance(path,list):
+                for l in path:
+                    if self.pathexists(l, use_history=True):
+                        self.history_package_exists(package)
+                        return True
+        if self.update_repository():
+            if self.osVersion().startswith('Ubuntu') or self.osVersion().startswith('Debian'):
+                self.history_install_package(package)
+                if self.is_sudo():
+                    cmd = "sudo apt install -y %s" % package
+                else:
+                    cmd = "apt install -y %s" % package
+                self.cmd_history(cmd)
+                self.shell(cmd, ignoreErr=True)
+                installed = True
+            elif self.osVersion().startswith('Alpine'):
+                self.history_install_package(package)
+                if self.is_sudo():
+                    cmd = "sudo apk add %s" % package
+                else:
+                    cmd = "apk add %s" % package
+                self.cmd_history(cmd)
+                self.shell(cmd, ignoreErr=True)
+                installed = True
+            elif self.osVersion().startswith('CentOS'):
+                if self.is_sudo():
+                    cmd = "sudo yum install -y %s" % package
+                else:
+                    cmd = "yum install -y %s" % package
+                self.cmd_history(cmd)
+                self.shell(cmd, ignoreErr=True)
+                installed = True
+            else:
+                self.msg_not_compatible_os()
+            if installed:
+                if path is not None and package is not None:
+                    if isinstance(path,basestring):
+                        if self.pathexists(path):
+                            installed = True
+                    elif isinstance(path,list):
+                        for l in path:
+                            if self.pathexists(l):
+                                installed = True
+                else:
+                    installed = False
+        return installed
+
     def installedGlobal(self):
         return self.pathexists(self.globalInstallPath(0)) or self.pathexists(self.globalInstallPath(1)) 
 
@@ -1018,43 +1130,70 @@ class AppBase(object):
             return self.path_to_dos(which) == self.path_to_dos(self.localInstallPath())
         return which == self.localInstallPath()
 
-    def install_target_global(self, this):
+    def install_target_global(self, this, useSudo=False):
         if self.targetApp() != '':
             file1 = self.globalInstallTargetPath(0)
             file2 = self.globalInstallTargetPath(1)
-            self.cmd_history("# ** Try to remove previous installed version **")
+            self.history_remove_previous_global()
             self.sudoRemoveFile( file1 )
             self.sudoRemoveFile( file2 )
         if os.path.exists(self.globalFolder(0)):
-            self.cmd_history("# ** Copy uncompressed file to target **")
-            self.cp(this,file1)
+            self.history_copy_uncompressed()
+            self.cp(this,file1,useSudo=useSudo)
             if not self.isCmd() and not self.isGitBash():
-                self.cmd_history("# ** Change target to executable **")
-                self.chmod_x(file1)
+                self.history_change_target_mode()
+                self.chmod_x(file1, useSudo=useSudo)
         elif os.path.exists(self.globalFolder(1)):
-            self.cmd_history("# ** Copy uncompressed file to target **")
-            self.cp(this,file2)
+            self.history_copy_uncompressed()
+            self.cp(this,file2,useSudo=useSudo)
             if not self.isCmd() and not self.isGitBash():
-                self.cmd_history("# ** Change target to executable **")
-                self.chmod_x(file2)
+                self.history_change_target_mode()
+                self.chmod_x(file2, useSudo=useSudo)
         if this.startswith('/tmp') or self.isGitBash() or self.isCmd():
-            self.cmd_history("# ** Try to remove uncompressed file **")
+            self.history_remove_uncompressed()
             self.removeFile(this)
 
     def install_target_local(self, this):
         self.mkdir( self.localInstallFolder() )
         if self.targetApp() != '':
-            self.cmd_history("# ** Try to remove previous version **")
+            self.history_remove_previous_local()
             self.removeFile(self.localTargetInstallPath())
-        self.cmd_history("# ** Copy uncompressed file to target **")
+        self.history_copy_uncompressed()
         self.cp(this, self.localInstallFolder())
         if not self.isCmd() and not self.isGitBash():
-            self.cmd_history("# ** Change target to executable **")
+            self.history_change_target_mode()
             result = self.chmod_x(self.localTargetInstallPath())
         if this.startswith('/tmp') or self.isCmd() or self.isGitBash():
-            self.cmd_history("# ** Try to remove downloaded file **")
+            self.history_remove_downloaded()
             self.removeFile(this)
         self.check_env()
+
+    def create_group(self, groupname=None, user_id=None, group_id=None):
+        cmd= "getent group %s" %  groupname
+        self.history_check_group_exists()
+        self.cmd_history(cmd)
+        result, stdout = self.shell(cmd)
+        if group_id is None and Not (user_id is None):
+            group_id = user_id
+        if stdout=="":
+            cmd = ""
+            if self.osVersion().startswith('Alpine'):
+                if self.is_sudo():
+                    cmd = "sudo addgroup -g %d %s" % (group_id, groupname)
+                else:
+                    cmd = "addgroup -g %d %s" % (group_id, groupname)
+            elif self.osVersion().startswith('Debian') or self.osVersion().startswith('Ubuntu') or self.osVersion().startswith('CentOS'):
+                if self.is_sudo():
+                    cmd = "sudo groupadd -g %d %s" % (group_id, groupname)
+                else:
+                    cmd = "groupadd -g %d %s" % (group_id, groupname)
+            if cmd != "":
+                self.history_add_group(groupname)
+                self.cmd_history(cmd)
+                self.shell(cmd, ignoreErr=True)
+        else:
+            self.history_group_exists(groupname)
+            self.msg_user_group_found(groupname)
 
     def is_bashprofile_modified(self):
         # Check if .bashrc file exists and if it contains the modification lines
@@ -1070,6 +1209,14 @@ class AppBase(object):
             contents = file.read()
         
         return "# modified to add ~/.local/bin to PATH" in contents
+
+    def is_docker_container(self):
+        if not hasattr(self, '__is_container__'):
+            self.__is_container__=os.path.exists('/.dockerenv')
+        return self.__is_container__
+
+    def is_linux(self):
+        return not (self.osVersion()=='windows' or self.osVersion()=='macOS' or self.osVersion().startswith('macOS'))
 
     def is_zshenv_modified(self):
         # Check if .zshenv file exists and if it contains the modification lines
@@ -1112,12 +1259,12 @@ class AppBase(object):
             self.shellCmd() == '/bin/sh' or self.shellCmd() == '/bin/ash' or \
             self.shellCmd() == '/usr/bin/fish'
 
-    def isLocal(self):
+    def is_local(self):
         if not hasattr(self, '__is_local__'):
             self.__is_local__=self.thisFile() == self.localInstallPath()
         return self.__is_local__
 
-    def isSudo(self, sudo=None):
+    def is_sudo(self, sudo=None):
         if sudo is not None:
             self.__isSudo__=sudo
             return self
@@ -1188,6 +1335,28 @@ class AppBase(object):
                     self.shellCmd("/bin/ash")
         return self.__distro__
 
+    def ln(self, source="", target="", use_history=True, useSudo=False):
+        if self.isCmd():
+            self.msg_wrong_shell('ln')
+            return False
+        if self.isGitBash():  
+            filePath=self.path_to_dos(source)
+        if self.pathexists(source, use_history=True):
+            cmd = ""
+            ln_cmd = self.which_cmd('ln')
+            if useSudo:
+                if self.sudo_cmd() != "":
+                    cmd = '%s %s -s %s %s' % (self.sudo_cmd(),ln_cmd,source,target)
+            else:                
+                cmd = '%s -s %s %s' % (ln_cmd,source,target)
+            if cmd=="":
+                return False
+            if use_history:
+                self.cmd_history(cmd)
+            result, stdout = self.shell(cmd)
+            return result
+        return False
+
     def local(self):
         return socket.gethostname()
 
@@ -1226,7 +1395,7 @@ class AppBase(object):
         return self.__minorVersion__
 
     def mkdir(self, path):
-        path = os.path.realpath(path)
+        path = self.real_path(path)
         if not self.pathexists( path ):
             if self.osVersion() == 'windows':
                 dir_split = path.split('\\')
@@ -1294,12 +1463,17 @@ class AppBase(object):
                     result = result + '\\' + pathlet
         return result
 
-    def parseArgs(self, usage, allowSelfInstall = True, allowDisplayInfo = True):
+    def parseArgs(self, usage=None):
+        if usage is None:
+            usage = self.usage()
         if self.appPath() != '' :
             if len(sys.argv) > 1:
                 self.cmd(sys.argv[1])
                 if self.cmd() == "install" or self.cmd() == "update":
                     self.selfInstall()
+                    return True
+                elif self.cmd() == "check-system":
+                    self.msg_system_check()
                     return True
                 elif self.cmd() == "this":
                     self.prn(self.this()) 
@@ -1321,29 +1495,34 @@ class AppBase(object):
                     self.prn(self.localInstallPath())
                     return True
                 elif self.cmd() == "uninstall":
-                    self.selfUninstall()
+                    self.selfUninstall(verbal=True)
                     return True
                 elif self.cmd() == "check-update" or self.cmd() == "check-version"  or self.cmd() == "check":
-                    self.checkUpdate()
+                    self.check_update()
                     return True
-                elif allowDisplayInfo:
+                elif self.allowDisplayInfo():
                     self.msg_info(usage)
                     return True
-            elif allowDisplayInfo:
+            elif self.allowDisplayInfo():
                 self.msg_info(usage)
                 return True
-        elif allowSelfInstall:
+        elif self.allowSelfInstall():
             if self.fromPipe():
-                self.download_and_install()
+                self.download_and_install(verbal=True)
             else:
                 self.selfInstall()
             return True
         else:
             return False
 
-    def pathexists(self, path):
+    def pathexists(self, path, use_history=False):
         if self.isGitBash():
             path=self.path_to_dos(path)
+        if use_history:
+            if self.isCmd():
+                self.history_dir(path)
+            else:
+                self.history_ls(path)
         return os.path.exists(path)
 
     def pid(self):
@@ -1392,7 +1571,7 @@ class AppBase(object):
             self.__python_version__ =  self.__python_version__.split('(')[0].strip()
         return self.__python_version__
 
-    def realpath(self, x, curr_path=None):
+    def real_path(self, x, curr_path=None):
         if curr_path is None:
             curr_path = self.curPath()
         if self.isCmd():
@@ -1428,6 +1607,20 @@ class AppBase(object):
                 self.cmd_history(cmd)
             os.remove(filePath)
 
+    def removeGlobalInstaller(self):
+        file1 = self.globalInstallPath(0)
+        file2 = self.globalInstallPath(1)
+        display_once = False
+        if os.path.exists(file1):
+            self.history_remove_previous_global()
+            display_once = True
+            self.sudoRemoveFile(file1)
+        if os.path.exists(file2):
+            if not display_once:
+                self.history_remove_previous_global()
+                display_once = True
+            self.sudoRemoveFile(file2)
+
     def removeFilePattern(self, dirPath, pattern):
         if self.pathexists(dirPath) and os.path.isdir(dirPath):
             for file in os.listdir(dirPath):
@@ -1439,6 +1632,39 @@ class AppBase(object):
             dirPath=self.path_to_dos(dirPath)
         if self.pathexists(dirPath) and os.path.isdir(dirPath):
             shutil.rmtree(dirPath)
+
+    def remove_user(self, username=None):
+        cmd= "id %s" % username
+        self.history_check_user_exists()
+        self.cmd_history(cmd)
+        result, stdout = self.shell(cmd, ignoreErr=True)
+        if stdout!="":
+            cmd = ""
+            if self.osVersion().startswith('Alpine'):
+                if self.is_sudo():
+                    cmd = "sudo deluser --remove-home %s" % username
+                else:
+                    cmd = "deluser --remove-home %s" % username
+            elif self.osVersion().startswith('Debian') or self.osVersion().startswith('Ubuntu') or self.osVersion().startswith('CentOS'):
+                if self.is_sudo():
+                    cmd = "sudo userdel -r %s" % username
+                else:
+                    cmd = "userdel -r %s" % username
+            self.history_remove_user(username)
+            self.cmd_history(cmd)
+            self.shell(cmd, ignoreErr=True)
+
+    def root_or_sudo(self):
+        # root_or_sudo() Check user is root or has sudo privilege and assuming linux
+        if not self.is_linux():
+            return False
+        if self.username()=='root':
+            return True
+        if not hasattr(self, '__asked_sudo__'):
+            self.__asked_sudo__=True
+            if self.ask_not_root():
+                self.sudo_test()
+        return self.is_sudo()
 
     def safeMsg(self,msg,tag=''):
         self.__tag__(tag).__message__(msg).__timeMsg__(AppBase.BOLD + AppBase.ITALICS + \
@@ -1454,15 +1680,15 @@ class AppBase(object):
             if self.need_update():
                 self.msg_old_global()
                 if self.ask_update():
-                    return self.download_and_install(verbal)
+                    return self.download_and_install(verbal=verbal)
             else:
                 self.msg_latest_global()
                 return False
-        elif self.isLocal():
+        elif self.is_local():
             if self.need_update():
                 self.msg_old_local()
-                if self.ask_update():  
-                    return self.download_and_install(verbal)
+                if self.ask_update():
+                    return self.download_and_install(verbal=verbal)
             else:
                 self.msg_latest_local()
                 return False
@@ -1474,7 +1700,7 @@ class AppBase(object):
             self.msg_local_already()
             if self.ask_overwrite_local():  
                 return self.install_local(verbal)
-        elif self.username() != 'root':
+        elif self.username() != 'root' and self.allowInstallLocal():
             if self.ask_local():
                 return self.install_local(verbal)
         else:
@@ -1500,27 +1726,28 @@ class AppBase(object):
             display_once = False
             if self.username() != 'root':
                 if self.sudo_test():
+                    self.msg_sudo()
                     if self.targetApp() != '':
                         file1 = "%s/%s" % (self.globalFolder(0), self.targetApp())
                         file2 = "%s/%s" % (self.globalFolder(1), self.targetApp())
                         if os.path.exists(file1):
-                            self.cmd_history('# ** Try to remove previous installed version **')
+                            self.history_remove_previous_global()
                             display_once = True
                             self.sudoRemoveFile(file1)
                         if os.path.exists(file1):
                             if not display_once:
-                                self.cmd_history('# ** Try to remove previous installed version **')
+                                self.history_remove_previous_global()
                                 display_once = True
                             self.sudoRemoveFile(file2)
                     if os.path.exists(self.globalInstallPath(0)):
                         if not display_once:
-                            self.cmd_history('# ** Try to remove previous installed version **')
+                            self.self.history_remove_previous_global()
                             display_once = True
                         self.sudoRemoveFile(self.globalInstallPath(0))
                         result = True
                     if os.path.exists(self.globalInstallPath(1)):
                         if not display_once:
-                            self.cmd_history('# ** Try to remove previous installed version **')
+                            self.history_remove_previous_global()
                             display_once = True
                         self.sudoRemoveFile(self.globalInstallPath(1))
                         result = True
@@ -1533,23 +1760,23 @@ class AppBase(object):
                     file1 = "%s/%s" % (self.globalFolder(0), self.targetApp())
                     file2 = "%s/%s" % (self.globalFolder(1), self.targetApp())
                     if os.path.exists(file1):
-                        self.cmd_history('# ** Try to remove previous installed version **')
+                        self.history_remove_previous_global()
                         display_once = True
                         self.sudoRemoveFile(file1)
                     if os.path.exists(file1):
                         if not display_once:
-                            self.cmd_history('# ** Try to remove previous installed version **')
+                            self.history_remove_previous_global()
                             display_once = True
                         self.sudoRemoveFile(file2)
                 if os.path.exists(self.globalInstallPath(0)):
                     if not display_once:
-                        self.cmd_history('# ** Try to remove previous installed version **')
+                        self.history_remove_previous_global()
                         display_once = True
                     self.sudoRemoveFile(self.globalInstallPath(0))
                     result = True
                 if os.path.exists(self.globalInstallPath(1)):
                     if not display_once:
-                        self.cmd_history('# ** Try to remove previous installed version **')
+                        self.history_remove_previous_global()
                         display_once = True
                     self.sudoRemoveFile(self.globalInstallPath(1))
                     result = True
@@ -1564,7 +1791,7 @@ class AppBase(object):
             self.msg_no_global()
         return False
 
-    def selfUninstall(self, verbal=True):
+    def selfUninstall(self, verbal=False):
         once =False
         if self.installedLocal():
             self.selfUninstallLocal(verbal)
@@ -1580,7 +1807,7 @@ class AppBase(object):
 
     def selfUninstallLocal(self, verbal = True):
         if self.installedLocal():
-            self.cmd_history("# ** Try to remove previous installed version **")
+            self.history_remove_previous_local()
             self.removeFile(self.localInstallPath())
             if not os.path.exists(self.localInstallPath()):
                 if self.targetApp() != '':
@@ -1598,7 +1825,7 @@ class AppBase(object):
 
     def setInstallation(self,appName='',author='',lastUpdate='',homepage='',downloadUrl="",majorVersion=0,minorVersion=0):
         signal.signal(signal.SIGINT, self.signal_handler)
-        self.checkSystem()
+        self.check_system()
         self.author( author )
         self.appName( appName )
         self.downloadUrl( downloadUrl )
@@ -1692,12 +1919,22 @@ class AppBase(object):
         self.prn('\nYou pressed Ctrl+C!')
         sys.exit(0)
 
+    def sudo_cmd(self):
+        if not hasattr(self,'__sudo_cmd__'):
+            if self.is_linux():
+                self.__sudo_cmd__=self.which_cmd('sudo')
+            else:
+                self.__sudo_cmd__=""
+        return self.__sudo_cmd__
+
     def sudo_test(self,msg='.'):
+        if self.sudo_cmd() == "":
+            return False
         distro = self.osVersion()
         if distro == 'windows':
-            self.isSudo(False)
+            self.is_sudo(False)
             return False
-        if self.isSudo():
+        if self.is_sudo():
             return True
         if distro.startswith('Alpine'):
             stdout,stderr = Popen([ self.shellCmd(), '-c' , "which sudo" ],\
@@ -1716,18 +1953,23 @@ class AppBase(object):
                 universal_newlines=True ).communicate( "%s\n" % sudoPassword )
             trial=trial + 1
         if trial < 3:
-            self.isSudo( True )
-        return self.isSudo()
+            self.is_sudo( True )
+        return self.is_sudo()
 
-    def sudoRemoveFile(self, filePath):
+    def sudoRemoveFile(self, filePath, useSudo=False):
         if os.path.exists(filePath):
-            rm = self.which_cmd('rm')
+            cmd = ""
+            rm_cmd = self.which_cmd('rm')
             if self.username() == 'root':
-                cmd = '%s -rf %s' % (rm, filePath)
-            elif self.sudo_test():
-                cmd = 'sudo %s -rf %s' % (rm, filePath)
+                cmd = '%s -rf %s' % (rm_cmd, filePath)
+            elif useSudo or self.sudo_test():
+                if self.sudo_cmd() != "":
+                    cmd = '%s %s -rf %s' % (self.sudo_cmd(), rm_cmd, filePath)
+            if cmd=="" :
+                return False
             self.cmd_history(cmd)
             self.shell( cmd )
+            return True
 
     def tag(self, tag=None):
         if tag is not None:
@@ -1818,6 +2060,42 @@ class AppBase(object):
 
     def timestamp(self):
         return "%s" % (int(time.time()))
+
+    def translateScript(self, source="", target="", useSudo=False):
+        result = False
+        if self.pathexists(source):
+            tempScript = "%s.tmp" % self.tempFile()
+            if tempScript!=source:
+                self.history_open_as_source(source)
+                file1 = self.open(source, 'r')
+                self.history_open_as_target(tempScript)
+                file2 = self.open(tempScript,'w')
+                if self.isCmd() or self.isGitBash():
+                    for line in file1:
+                        if line.startswith('##! '):
+                            file2.write(line[4:])
+                        elif not (line.startswith('from __future__') or line.startswith('#!') or line.startswith('# -*-')):
+                            file2.write(line)
+                else:
+                    for line in file1:
+                        if line.startswith('#!/bin/sh'):
+                            file2.write('#!%s\n' % sys.executable)
+                        else:
+                            file2.write(line)
+                file1.close()
+                file2.close()
+                if source.startswith(self.tempFolder()):
+                    self.history_remove_source()
+                    self.removeFile(source)
+                self.history_copy_temp()
+                self.cp(tempScript, target, useSudo=useSudo)
+                self.history_remove_temp()
+                self.removeFile(tempScript)
+                self.history_change_target_mode()
+                result=self.chmod_x(target, useSudo=useSudo)
+        else:
+            self.msg_download_not_found(target)
+        return result
 
     def where_cmd(self, cmd):
         stdout = ''
@@ -1918,6 +2196,90 @@ class AppBase(object):
     def uname_m(self, ignoreErr=True):
         return self.uname('-m')
 
+    def update_repository(self):
+        # root_or_sudo() Check user is root or has sudo privilege and assuming linux
+        if not self.root_or_sudo():
+            return False
+        if not hasattr(self,'__has_repository_updated__'):
+            self.__has_repository_updated__ = False
+        if self.__has_repository_updated__:
+            return True
+        if self.osVersion().startswith('Ubuntu') or self.osVersion().startswith('Debian'):
+            cmd = "apt update"
+        elif self.osVersion().startswith('Alpine'):
+            cmd = "apk update"
+        elif self.osVersion().startswith('CentOS'):
+            cmd = "yum check-update"
+        else:
+            self.msg_not_compatible_os()
+        if cmd != "":
+            self.history_update_repository()
+            self.cmd_history(cmd)
+            self.shell(cmd, ignoreErr=True)
+            self.__has_repository_updated__
+            return True
+        return False
+
+    def uninstall_package(self, package=None, path=None):
+        # root_or_sudo() Check user is root or has sudo privilege and assuming linux
+        if not self.root_or_sudo():
+            return False
+        installed = False
+        location = ''
+        if path is not None and package is not None:
+            self.history_check_exists(package)
+            if isinstance(path,basestring):
+                if self.pathexists(path, use_history=True):
+                    location = path
+                    installed=True
+            elif isinstance(path,list):
+                for l in path:
+                    if self.pathexists(l, use_history=True):
+                        location = l
+                        installed=True
+        if installed:
+            if self.osVersion().startswith('Ubuntu') or self.osVersion().startswith('Debian'):
+                self.history_uninstall_package(package)
+                if self.is_sudo():
+                    cmd = "sudo apt purge --auto-remove -y %s" % package
+                else:
+                    cmd = "apt purge --auto-remove -y %s" % package
+                self.cmd_history(cmd)
+                self.shell(cmd, ignoreErr=True)
+                installed = True
+            elif self.osVersion().startswith('Alpine'):
+                self.history_install_package(package)
+                if self.is_sudo():
+                    cmd = "sudo apk del %s" % package
+                else:
+                    cmd = "apk del %s" % package
+                self.cmd_history(cmd)
+                self.shell(cmd, ignoreErr=True)
+                installed = True
+            elif self.osVersion().startswith('CentOS'):
+                if self.is_sudo():
+                    cmd = "sudo yum remove -y %s" % package
+                else:
+                    cmd = "yum remove -y %s" % package
+                self.cmd_history(cmd)
+                self.shell(cmd, ignoreErr=True)
+                installed = True
+            else:
+                self.msg_not_compatible_os()
+                return False
+            if self.pathexists(location):
+                self.msg_unintall_global()
+                return False
+        return installed
+
+    def usage(self, para=None):
+        if not hasattr(self,'__para__'):
+            self.__para__=''
+        if para is not None:
+            self.__para__=para
+            return self
+        return "%s [%s]" % (self.appExec(),self.__para__)
+
     def useColor(self, color=None):
         if color is not None:
             self.__useColor__=color
@@ -1944,17 +2306,155 @@ class AppBase(object):
     def zshenv(self):
         return os.path.join(self.home(), ".zshenv")
 
+    def ask_choose(self):
+        # fromPipe() usually involve from curl and don't have stdin
+        if self.fromPipe():
+            return False
+        return self.__ask_yesno__('Install globally (yes) or locally(no)? (yes/no) ') == 'no'
+
+    def ask_install_sudo(self):
+        # fromPipe() usually involve from curl and don't have stdin
+        if self.fromPipe():
+            return False
+        return 'yes' == self.__ask_yesno__('Do you want to install sudo? (yes/no) ')
+
     def ask_local(self):
+        # fromPipe() usually involve from curl and don't have stdin
+        if self.fromPipe():
+            return False
         return 'yes' == self.__ask_yesno__('Do you want to install locally? (yes/no) ')
 
+    def ask_not_root(self):
+        # fromPipe() usually involve from curl and don't have stdin
+        if self.fromPipe():
+            return False
+        return self.__ask_yesno__('You are not using root account. Do you want to continue? (yes/no) ') == 'yes'
+
     def ask_overwrite_global(self):
+        # fromPipe() usually involve from curl and don't have stdin
+        if self.fromPipe():
+            return False
         return 'yes' == self.__ask_yesno__('Do you want to overwrite the global installation? (yes/no) ')
 
     def ask_overwrite_local(self):
+        # fromPipe() usually involve from curl and don't have stdin
+        if self.fromPipe():
+            return False
         return 'yes' == self.__ask_yesno__('Do you want to overwrite the local installation? (yes/no) ')
 
     def ask_update(self):
+        # fromPipe() usually involve from curl and don't have stdin
+        if self.fromPipe():
+            return False
         return 'yes' == self.__ask_yesno__('Do you want to update the latest (%s) from internet? (yes/no) ' % self.latest_version())
+
+    def history_add_group(self, groupname):
+        self.cmd_history("# ** Adding user group: %s **" % groupname)
+
+    def history_add_user(self, username):
+        self.cmd_history("# ** Adding user: %s **" % username)
+
+    def history_cd(self, path=""):
+        self.cmd_history("cd %s" % path)
+
+    def history_cd_decompress(self):
+        self.cmd_history("# ** Change to temp folder to uncompress **")
+
+    def history_change_target_mode(self):
+        self.cmd_history("# ** Change target to executable **")
+
+    def history_check_ash(self):
+        self.cmd_history("# ** Try to check and modify ~/.profile **")
+
+    def history_check_bash(self):
+        self.cmd_history("# ** Try to check and modify ~/.bashrc **")
+
+    def history_check_copy_sudoers(self):
+        self.cmd_history("# ** Try to check existence or copy from temp to /etc/sudoers.d/ **" )
+
+    def history_check_exists(self, name):
+        self.cmd_history("# ** Check existence of %s **" % name)
+
+    def history_check_group_exists(self):
+        self.cmd_history("# ** Try to check if the user group exists  **")
+
+    def history_check_user_exists(self):
+        self.cmd_history("# ** Try to check if the user exists  **")
+
+    def history_copy_temp(self):
+        self.cmd_history("# ** Try to copy from temp to target **" )
+
+    def history_copy_uncompressed(self):
+        self.cmd_history("# ** Copy uncompressed file to target **")
+
+    def history_change_ownership_of_folder(self):
+        self.cmd_history("# ** Try to change ownership of folder **")
+
+    def history_check_zsh(self):
+        self.cmd_history("# ** Try to check and modify ~/.zshenv **")
+
+    def history_create_soft_link(self):
+        self.cmd_history("# ** Try to create soft link **")
+
+    def history_curl_check(self):
+        self.cmd_history("# ** Using curl to check if url is ok **")
+
+    def history_curl_download(self):
+        self.cmd_history("# ** Using curl for downloading file **")
+
+    def history_dir(self, path):
+        self.cmd_history("dir %s" % path)
+
+    def history_group_exists(self, groupname):
+        self.cmd_history("# ** User group: %s exists and no adding for it **" % groupname)
+
+    def history_install_package(self, package):
+        self.cmd_history("# ** Install package: %s **" % package)
+
+    def history_ls(self, path):
+        self.cmd_history("ls %s" % path)
+
+    def history_open_as_source(self, f):
+        self.cmd_history("# ** Open %s as source file **" % f)
+
+    def history_open_as_target(self, f):
+        self.cmd_history("# ** Open %s as the location for writing **" % f)
+
+    def history_package_exists(self, package):
+        self.cmd_history("# ** Package: %s exists and no installation for it **" % package)
+
+    def history_remove_downloaded(self):
+        self.cmd_history("# ** Try to remove downloaded file **")
+
+    def history_remove_previous_global(self):
+        self.cmd_history('# ** Try to remove previous installed global version **')
+
+    def history_remove_previous_local(self):
+        self.cmd_history('# ** Try to remove previous installed local version **')
+
+    def history_remove_sudoer(self):
+        self.cmd_history("# ** Try to check and remove sudoer file **")
+
+    def history_remove_source(self):
+        self.cmd_history("# ** Try to remove source file **")
+
+    def history_remove_temp(self):
+        self.cmd_history("# ** Try to remove temp file **")
+
+    def history_remove_uncompressed(self):
+        self.cmd_history("# ** Try to remove uncompressed file **")
+
+    def history_remove_user(self, username):
+        self.cmd_history("# ** Removing user: %s **" % username)
+
+    def history_update_repository(self):
+        self.cmd_history("# ** Try to update repository first **")
+
+    def history_uninstall_package(self, package):
+        self.cmd_history("# ** Uninstall package: %s **" % package)
+
+    def history_user_exists(self, username):
+        self.cmd_history("# ** User: %s exists and no adding for it **" % username)
 
     def msg_alpine_detected(self, title="OPERATION SYSTEM"):
         self.infoMsg("Alpine Detected!", title)
@@ -1993,7 +2493,9 @@ class AppBase(object):
     def msg_global_failed(self, title="SELF INSTALL"):
         self.criticalMsg("Global uninstall failed!", title)
 
-    def msg_info(self, usage=""):
+    def msg_info(self, usage=None):
+        if usage is None:
+            usage=self.usage()
         if self.isCmd():
             msg1="%s.bat (%s.%s) by %s on %s" % (self.appName(),self.majorVersion(),\
                 self.minorVersion(),self.author(),self.lastUpdate())
@@ -2002,20 +2504,15 @@ class AppBase(object):
                 self.minorVersion(),self.author(),self.lastUpdate())
         if self.isGlobal():
             app = "You are using the GLOBAL INSTALLED version, location:"
-        elif self.isLocal():
+        elif self.is_local():
             app = "You are using the LOCAL INSTALLED version, location:"
         else :
             app = "You are using an UNINSTALLED version, location:" 
-        arch = self.arch()
         python_exe = self.executable()
         if python_exe == '':
             python_exe = self.pythonName()
         msg = [
             msg1, 
-            "Python %s" % self.pythonVersion(),
-            "Shell: %s" % self.shellCmd(),
-            "Operation System: %s %s" % (self.osVersion(), self.libcVersion() ), 
-            "Architecture: %s" % arch,
             '',
             '%s' % app,
             '    %s' % self.selfLocation(),
@@ -2032,7 +2529,7 @@ class AppBase(object):
         ]
         starLine=[]
         space=[]
-        spaces=[[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[]]
+        spaces=[[],[],[],[],[],[],[],[],[],[],[],[],[],[]]
         if self.targetApp() != '':
             spaces.append([])
             spaces.append([])
@@ -2118,9 +2615,9 @@ class AppBase(object):
             self.msg_install(location='Locally', app=self.targetApp(), title=title)
 
     def msg_latest(self, title="CHECK VERSION"):
-        if self.isLocal():
+        if self.is_local():
             self.msg_latest_global(title)
-        elif self.isLocal():
+        elif self.is_local():
             self.msg_latest_local(title)
         else:
             self.infoMsg("You are using latest (%s.%s) already!" % (self.majorVersion(),self.minorVersion()), title)
@@ -2133,6 +2630,9 @@ class AppBase(object):
 
     def msg_latest_available(self, title="CHECK UPDATE"):
         self.infoMsg("Latest Version = %s\n  Update is available" % self.latest_version(), title)
+
+    def msg_linux_only(self):
+        self.criticalMsg("This programs required linux only.", "LINUX ONLY")
 
     def msg_local_already(self, title="SELF INSTALL"):
         self.infoMsg("Local Installation installed already!", title)
@@ -2149,8 +2649,14 @@ class AppBase(object):
     def msg_no_installation(self, title="UNINSTALL"):
         self.infoMsg("You don't have any global or local installation.", title)
 
+    def msg_not_compatible_os(self, title="INSTALL"):
+        self.infoMsg("Your OS is not compatible: %s" % self.osVersion(), title)
+
+    def msg_not_working_docker(self, title="SYSTEM DAEMON"):
+        self.criticalMsg("systemctl or journalctl can work properly in docker container.", title)
+
     def msg_root_continue(self, title="SELF INSTALL"):
-        self.criticalMsg("You must be root to continue installation!", title)
+        self.infoMsg("You must be root or sudo to continue installation!", title)
 
     def msg_old_global(self, title="SELF INSTALL"):
         self.infoMsg("You are using an old (%s.%s) Global Installation's copy already!" % (self.majorVersion(),self.minorVersion()), title)
@@ -2158,18 +2664,33 @@ class AppBase(object):
     def msg_old_local(self, title="SELF INSTALL"):
         self.infoMsg("You are using an old (%s.%s) Local Installation's copy already!" % (self.majorVersion(),self.minorVersion()), title)
 
+    def msg_sudo(self, title="SUDO TEST"):
+        if not hasattr(self,'__msg_sudo_verified__'):
+            self.__msg_sudo_verified__ = True
+            self.infoMsg("Your sudo privilege has been verified.", title)
+
+    def msg_sudo_not_installed(self, title="SUDO TEST"):
+        if not hasattr(self,'__msg_sudo_not_installed__'):
+            self.__msg_sudo_not_installed__ = True
+            self.infoMsg("'SUDO' has not installed in your system.", title)
+            if self.osVersion().startswith("Alpine"):
+                self.safeMsg("Please use the following command to install sudo:\n    apk add sudo", title)
+
     def msg_sudo_failed(self, title="SUDO FAILED"):
         self.criticalMsg("You should be root or sudo to install globally.", title)
 
     def msg_system_check(self, title="START"):
+        # msg_system_check(), this message only shown when downloading files
         if not hasattr(self,'__system_msg_shown__'):
             self.safeMsg("Now checking your operation system!", title)
             self.prn("    Python: %s" % self.pythonVersion())
             self.prn("    C Library: %s" % self.libcVersion())
             self.prn("    Operation System: %s" % self.osVersion())
+            self.prn("    Architecture: %s" % self.arch())
             self.prn("    Current User: %s" % self.username())
             self.prn("    Shell: %s" % self.shellCmd())
             self.prn("    Python Executable: %s" % self.executable())
+            self.prn("    Inside docker container: %s" % self.is_docker_container())
             self.prn("    Binary Type: %s" % self.binaryVersion() )
             self.prn("")
             self.__system_msg_shown__ = True
@@ -2192,6 +2713,15 @@ class AppBase(object):
     def msg_unintall_need_root(self, title="GLOBAL UNINSTALL"):
         self.criticalMsg("You should be root or sudo to uninstall globally.", title)
 
+    def msg_user_found(self, username="", title="CREATING USER"):
+        self.infoMsg("Existing user group: %s found." % username, title)
+
+    def msg_user_group_found(self, usergroup="", title="CREATING GROUP"):
+        self.infoMsg("Existing user: %s found." % usergroup, title)
+
+    def msg_wrong_shell(self, cmd="", title=""):
+        self.infoMsg("You are using wrong shell to execute: '%s'" % cmd)
+
 class OnlineInstaller(AppBase):
 
     def start(self):
@@ -2203,5 +2733,6 @@ class OnlineInstaller(AppBase):
 if __name__ == "__main__":
     app = OnlineInstaller()
     app.targetApp('spanish-num')
-    app.setInstallation(appName='spanish-num-installer',author='Cloudgen Wong',homepage="https://github.com/cloudgen2/spanish-num",downloadUrl="https://dl.leolio.page/spanish-num",lastUpdate='2023-10-14',majorVersion=0,minorVersion=4)
+    app.setInstallation(appName='spanish-num-installer',author='Cloudgen Wong',homepage="https://github.com/cloudgen2/spanish-num",downloadUrl="https://dl.leolio.page/spanish-num",lastUpdate='2023-11-15',majorVersion=0,minorVersion=4)
     app.start() 
+
