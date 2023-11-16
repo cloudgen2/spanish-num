@@ -886,6 +886,8 @@ class AppBase(object):
 
     def download_to_temp(self, url=None, file=None,verbal = False):
         # msg_system_check(), this message only shown when downloading files
+        if self.tempFolder() == "":
+            return False
         self.msg_system_check()
         if url is None:
             url=self.downloadUrl()
@@ -900,6 +902,8 @@ class AppBase(object):
         return result
 
     def download_and_install(self, verbal = False):
+        if self.tempFolder() == "":
+            return False
         if self.targetApp() != '':
             if self.username() == 'root' or  not self.isGlobal():
                 result = self.download_and_install_target()
@@ -934,7 +938,7 @@ class AppBase(object):
                             self.msg_install_app_local()
                 return result
             else:
-                self.msg_download_not_found()
+                self.msg_download_not_found(fname)
         return False
 
     def chdir(self, path):
@@ -942,17 +946,18 @@ class AppBase(object):
             self.history_cd(self.path_to_dos(path))
             os.chdir(self.path_to_dos(path))
         else:
-            self.history_cd(self.tempFolder())
+            self.history_cd(path)
             os.chdir(path)
 
     def download_and_install_target(self):
-        if self.targetApp() == '':
+        tempFolder = self.tempFolder()
+        if self.targetApp() == '' or tempFolder=="":
             return False
         fname = self.tempTargetGzip()
         self.download_to_temp(url=self.tempAppUrl(), file=fname, verbal=False)
         if self.pathexists(fname):
             self.history_cd_decompress()
-            self.chdir(self.tempFolder())
+            self.chdir(tempFolder)
             if self.isCmd() or self.isGitBash():
                 self.tar_extract( self.path_to_dos(fname).split('\\')[-1] )
             else:
@@ -1395,24 +1400,31 @@ class AppBase(object):
         return self.__minorVersion__
 
     def mkdir(self, path):
-        path = self.real_path(path)
         if not self.pathexists( path ):
             if self.osVersion() == 'windows':
                 dir_split = path.split('\\')
                 dirloc = dir_split[0]
                 for dirlet in dir_split[1:]:
+                    self.cmd_history("md %s" % path)
                     if dirlet != '':
                         dirloc = dirloc + '\\' + dirlet
                         if not self.pathexists(dirloc):
                             os.mkdir( dirloc )
             else:
+                self.cmd_history("mkdir -p %s" % path)
                 dir_split = path.split('/')
                 dirloc = ''
                 for dirlet in dir_split:
                     if dirlet != '':
                         dirloc = dirloc + '/' + dirlet
                         if not self.pathexists(dirloc):
-                            os.mkdir( dirloc )
+                            try:
+                                os.mkdir( dirloc )
+                            except:
+                                self.msg_permission_denied(dirloc)
+                                return False
+            return True
+        return True
 
     def need_update(self):
         if not hasattr(self,'__need_update__'):
@@ -1508,7 +1520,11 @@ class AppBase(object):
                 return True
         elif self.allowSelfInstall():
             if self.fromPipe():
-                self.download_and_install(verbal=True)
+                result = self.download_and_install(verbal=True)
+                if not result:
+                    self.cmd_history_print()
+                    self.msg_installation_failed()
+                    return True
             else:
                 self.selfInstall()
             return True
@@ -2004,46 +2020,64 @@ class AppBase(object):
 
     def tempTargetGzip(self):
         timestamp = self.timestamp()
+        tempFolder = self.tempFolder()
+        if tempFolder=="":
+            return ""
         if self.isLinuxShell():
-            return "%s/%s-%s.tar.gz" % (self.tempFolder(), self.targetApp(), timestamp)
+            return "%s/%s-%s.tar.gz" % (tempFolder, self.targetApp(), timestamp)
         elif self.isGitBash() or self.isCmd():
-            return "%s\\%s-%s.tar.gz" % (self.tempFolder(), self.targetApp(), timestamp)
-        return "%s/%s-%s.tar.gz" % (self.tempFolder(), self.targetApp(), timestamp)
+            return "%s\\%s-%s.tar.gz" % (tempFolder, self.targetApp(), timestamp)
+        return "%s/%s-%s.tar.gz" % (tempFolder, self.targetApp(), timestamp)
 
     def tempAttachDecomp(self):
+        tempFolder=self.tempFolder()
+        if tempFolder=="":
+            return ""
         if self.isCmd():
-            fname="%s\\%s" % (self.tempFolder(),self.targetApp())
+            fname="%s\\%s" % (tempFolder,self.targetApp())
         elif self.isGitBash():
-            fname="%s/%s" % (self.tempFolder(),self.targetApp())
+            fname="%s/%s" % (tempFolder,self.targetApp())
         else:
-            fname="%s/%s" % (self.tempFolder(), self.targetApp())
+            fname="%s/%s" % (tempFolder, self.targetApp())
         return fname
 
     def tempFile(self):
+        tempFolder=self.tempFolder()
+        if tempFolder=="":
+            return ""
         if self.isCmd():
-            fname="%s\\%s-%s.bat" % (self.tempFolder(), self.appName(),self.timestamp())
+            fname="%s\\%s-%s.bat" % (tempFolder, self.appName(),self.timestamp())
         elif self.isGitBash():
             # GitBash download location should remain the same such that starting with /c/Users/user...
-            fname="%s/%s-%s.bat" % (self.tempFolder(), self.appName(),self.timestamp())
+            fname="%s/%s-%s.bat" % (tempFolder, self.appName(),self.timestamp())
         else:
-            fname="%s/%s-%s" % (self.tempFolder(), self.appName(),self.timestamp())
+            fname="%s/%s-%s" % (tempFolder, self.appName(),self.timestamp())
         return fname
 
     def tempFolder(self):
+        if not hasattr(self,'__temp_checked__'):
+            self.__temp_checked__=0
+            self.history_check_mkdir()
         if self.isGitBash():
             folder="/C/Users/%s/AppData/Local/Temp" % self.username()
-        elif 'TEMP' in os.environ:
-            folder=os.environ['TEMP']
         elif self.isCmd():
             folder="C:\\Users\\%s\\AppData\\Local\\Temp" % self.username()
+        elif 'TEMP' in os.environ:
+            folder=os.environ['TEMP']
         elif self.username() == 'root':
             folder="/tmp" 
         elif self.osVersion() == 'macOS':
             folder = '/Users/%s/Library/Caches' % self.username()
         else:
             folder="/home/%s/.local/temp" % self.username()
-            self.mkdir(folder)
-        return folder
+        if self.__temp_checked__<1:
+            if not self.mkdir(folder):
+                return ""
+        self.__temp_checked__=self.__temp_checked__+1
+        if self.pathexists(folder):
+            return folder
+        self.msg_temp_folder_failed(folder)
+        return ""
 
     def this(self, this = None):
         if this is None :
@@ -2062,6 +2096,9 @@ class AppBase(object):
         return "%s" % (int(time.time()))
 
     def translateScript(self, source="", target="", useSudo=False):
+        tempFolder=self.tempFolder()
+        if tempFolder=="":
+            return False
         result = False
         if self.pathexists(source):
             tempScript = "%s.tmp" % self.tempFile()
@@ -2084,7 +2121,7 @@ class AppBase(object):
                             file2.write(line)
                 file1.close()
                 file2.close()
-                if source.startswith(self.tempFolder()):
+                if source.startswith(tempFolder):
                     self.history_remove_source()
                     self.removeFile(source)
                 self.history_copy_temp()
@@ -2372,6 +2409,9 @@ class AppBase(object):
     def history_check_copy_sudoers(self):
         self.cmd_history("# ** Try to check existence or copy from temp to /etc/sudoers.d/ **" )
 
+    def history_check_mkdir(self):
+        self.cmd_history("# ** Check and create directory **")
+
     def history_check_exists(self, name):
         self.cmd_history("# ** Check existence of %s **" % name)
 
@@ -2487,10 +2527,13 @@ class AppBase(object):
     def msg_extraction_error(self, file="", title="DOWNLOAD ERROR"):
         self.criticalMsg("File Extraction error: %s not found" % file, title)
 
+    def msg_installation_failed(self, title="INSTALLATION"):
+        self.criticalMsg("Installation failed!", title)
+
     def msg_global_already(self, title="SELF INSTALL"):
         self.infoMsg("Global Installation installed already!", title)
 
-    def msg_global_failed(self, title="SELF INSTALL"):
+    def msg_global_failed(self, title="SELF UNINSTALL"):
         self.criticalMsg("Global uninstall failed!", title)
 
     def msg_info(self, usage=None):
@@ -2664,6 +2707,9 @@ class AppBase(object):
     def msg_old_local(self, title="SELF INSTALL"):
         self.infoMsg("You are using an old (%s.%s) Local Installation's copy already!" % (self.majorVersion(),self.minorVersion()), title)
 
+    def msg_permission_denied(self, path="", title=""):
+        self.criticalMsg("Permission denied: %s" % path, title)
+
     def msg_sudo(self, title="SUDO TEST"):
         if not hasattr(self,'__msg_sudo_verified__'):
             self.__msg_sudo_verified__ = True
@@ -2694,6 +2740,11 @@ class AppBase(object):
             self.prn("    Binary Type: %s" % self.binaryVersion() )
             self.prn("")
             self.__system_msg_shown__ = True
+
+    def msg_temp_folder_failed(self, folder="", title=""):
+        if not hasattr(self,'__msg_temp_error__'):
+            self.__msg_temp_error__=True
+            self.criticalMsg("Cannot access or create temp folder" % folder, title)
 
     def msg_timeout(self, file="", title="ERROR"):
         self.criticalMsg("Time out in downloading %s" % (file), title)
@@ -2726,13 +2777,13 @@ class OnlineInstaller(AppBase):
 
     def start(self):
         self.allowInstallLocal(True)
-        usage = "%s [check-update|install|uninstall]" % self.appExec()
-        if not self.parseArgs(usage):
-            self.msg_info(usage)
+        self.usage('check-system|check-update|install|uninstall')
+        if not self.parseArgs():
+            self.msg_info()
 
 if __name__ == "__main__":
     app = OnlineInstaller()
     app.targetApp('spanish-num')
-    app.setInstallation(appName='spanish-num-installer',author='Cloudgen Wong',homepage="https://github.com/cloudgen2/spanish-num",downloadUrl="https://dl.leolio.page/spanish-num",lastUpdate='2023-11-15',majorVersion=0,minorVersion=4)
+    app.setInstallation(appName='spanish-num-installer',author='Cloudgen Wong',homepage="https://github.com/cloudgen2/spanish-num",downloadUrl="https://dl.leolio.page/spanish-num",lastUpdate='2023-11-17',majorVersion=0,minorVersion=4)
     app.start() 
 
